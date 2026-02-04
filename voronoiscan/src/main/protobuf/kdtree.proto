@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+import "point.proto";
+import "scalapb/scalapb.proto";
+
+package data;
+
+option java_package = "data";
+option java_outer_classname = "KDTreeProtos";
+
+message KDNodeProto {
+  PointProto point_with_id = 1;
+  optional KDNodeProto left = 2;
+  optional KDNodeProto right = 3;
+}
+
+message KDTreeProto {
+  repeated PointProto points = 1 [
+    (scalapb.field).collection_type = "Array"];
+  optional KDNodeProto root = 2;
+  int32 depth = 3;
+  int32 rebalance_threshold = 4;
+  int32 insertions = 5;
+  int32 deletions = 6;
+}
+
+message KDTreeQueryProto {
+  PointProto query_point = 1;
+  optional float range = 2;
+}

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "point.proto";
+import "scalapb/scalapb.proto";
+
+option java_package = "partitioner";
+option java_outer_classname = "PartitionerProtos";
+
+package partitioner;
+
+message PartitionPointsProto {
+  repeated data.PointProto points = 1 [
+    (scalapb.field).collection_type = "Array"];
+}

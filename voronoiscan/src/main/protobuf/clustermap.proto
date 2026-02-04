@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package dto;
+import "scalapb/scalapb.proto";
+
+option java_package = "dto";
+option java_outer_classname = "ClustermapProtos";
+
+message ClusterMapProto {
+  repeated int32 cellIndices = 1 [
+    (scalapb.field).collection_type = "Array"];
+  repeated int32 localClusterIds = 2 [
+    (scalapb.field).collection_type = "Array"];
+  repeated int32 globalClusterIds = 3 [
+    (scalapb.field).collection_type = "Array"];
+}

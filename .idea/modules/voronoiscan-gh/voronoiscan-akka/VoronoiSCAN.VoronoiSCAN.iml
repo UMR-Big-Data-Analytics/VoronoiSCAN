@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module external.linked.project.id="voronoiScan [file:///Users/florian/dev/uni/jvm/voronoiscan-gh/]" external.linked.project.path="$MODULE_DIR$/../../../../voronoiscan" external.root.project.path="$MODULE_DIR$/../../../.." external.system.id="SBT" external.system.module.type="nestedProject" type="JAVA_MODULE" version="4">
+  <component name="DisplayModuleName">
+    <option name="name" value="VoronoiSCAN" />
+  </component>
+  <component name="NewModuleRootManager" LANGUAGE_LEVEL="JDK_21" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$/../../../../voronoiscan">
+      <excludeFolder url="file://$MODULE_DIR$/../../../../voronoiscan/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="module" module-name="VoronoiSCAN.VoronoiSCAN.main" />
+    <orderEntry type="module" module-name="VoronoiSCAN.VoronoiSCAN.test" production-on-test="" />
+  </component>
+</module>

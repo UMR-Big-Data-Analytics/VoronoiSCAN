@@ -1,0 +1,23 @@
+syntax = "proto3";
+import "scalapb/scalapb.proto";
+
+package data;
+
+option java_package = "data";
+option java_outer_classname = "PointProtos";
+
+message PointProto {
+  repeated float vector = 1;
+  int64 id = 2;
+  optional double distance_to_center = 3;
+}
+
+message PointCollectionProto {
+  repeated PointProto points = 1 [
+    (scalapb.field).collection_type = "Array"];
+}
+
+message PointIdCollectionProto {
+  repeated int64 pointIds = 1 [
+    (scalapb.field).collection_type = "Array"];
+}

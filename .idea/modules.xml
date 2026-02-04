@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/voronoiscan-akka/VoronoiSCAN.VoronoiSCAN.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/voronoiscan-akka/VoronoiSCAN.VoronoiSCAN.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.VoronoiSCAN-build.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.VoronoiSCAN-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/voronoiscan/VoronoiSCAN.VoronoiSCAN.main.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/voronoiscan/VoronoiSCAN.VoronoiSCAN.main.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/voronoiscan/VoronoiSCAN.VoronoiSCAN.test.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/voronoiscan/VoronoiSCAN.VoronoiSCAN.test.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/core/VoronoiSCAN.core.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/core/VoronoiSCAN.core.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/core/VoronoiSCAN.core.main.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/core/VoronoiSCAN.core.main.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/core/VoronoiSCAN.core.test.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/core/VoronoiSCAN.core.test.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.main.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.main.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.test.iml" filepath="$PROJECT_DIR$/.idea/modules/voronoiscan-gh/VoronoiSCAN.test.iml" />
+    </modules>
+  </component>
+</project>

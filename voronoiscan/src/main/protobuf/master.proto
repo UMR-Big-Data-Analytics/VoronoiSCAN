@@ -1,0 +1,8 @@
+syntax = "proto3";
+package master;
+import "scalapb/scalapb.proto";
+
+option java_package = "master";
+option java_outer_classname = "MasterProtos";
+
+// LabeledPointsChunkProto has been moved to writer.proto

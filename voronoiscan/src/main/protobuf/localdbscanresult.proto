@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+import "point.proto";
+import "scalapb/scalapb.proto";
+
+package dto;
+
+option java_package = "dto";
+option java_outer_classname = "LocalDBSCANResultProtos";
+
+
+message LocalDBSCANResultDtoProto {
+  int32 cellIdx = 1;
+  repeated data.PointIdCollectionProto corePoints = 2 [
+    (scalapb.field).collection_type = "Array"];
+  repeated data.PointIdCollectionProto borderPoints = 3 [
+    (scalapb.field).collection_type = "Array"];
+  repeated int64 labelKeys = 4 [
+    (scalapb.field).collection_type = "Array"];
+  repeated int32 labelValues = 5 [
+    (scalapb.field).collection_type = "Array"];
+}

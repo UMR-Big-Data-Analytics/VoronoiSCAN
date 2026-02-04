@@ -1,0 +1,15 @@
+syntax = "proto3";
+package writer;
+import "scalapb/scalapb.proto";
+
+option java_package = "writer";
+option java_outer_classname = "WriterProtos";
+
+message LabeledPointsChunkProto {
+  repeated int64 ids = 1 [
+    (scalapb.field).collection_type = "Array"];
+  repeated int32 labels = 2 [
+    (scalapb.field).collection_type = "Array"];
+  int32 chunkIdx = 3;
+  int32 totalChunks = 4;
+}

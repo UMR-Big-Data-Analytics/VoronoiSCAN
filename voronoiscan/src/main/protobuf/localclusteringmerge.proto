@@ -1,0 +1,20 @@
+syntax = "proto3";
+package data;
+import "scalapb/scalapb.proto";
+
+option java_package = "data";
+option java_outer_classname = "LocalClusteringMergeProtos";
+
+message MergeProto {
+  repeated int32 leftClusterIds = 1 [
+    (scalapb.field).collection_type = "Array"];
+  repeated int32 rightClusterIds = 2 [
+    (scalapb.field).collection_type = "Array"];
+}
+
+message LocalClusteringMergeProto {
+  int32 leftCellIdx = 1;
+  int32 rightCellIdx = 2;
+  repeated MergeProto merges = 3 [
+    (scalapb.field).collection_type = "Array"];
+}

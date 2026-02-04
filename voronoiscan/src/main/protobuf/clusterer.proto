@@ -1,0 +1,24 @@
+syntax = "proto3";
+package clusterer;
+import "scalapb/scalapb.proto";
+
+option java_package = "clusterer";
+option java_outer_classname = "ClustererProtos";
+
+import "point.proto";
+
+message AddPointsProto {
+  repeated data.PointProto points = 1 [(scalapb.field).collection_type = "Array"];
+}
+
+message DistributePointsProto {
+  repeated data.PointProto points = 1 [(scalapb.field).collection_type = "Array"];
+  int32 senderIdx = 2;
+  // Take care to serialize the actor ref as a string
+  string replyTo = 3;
+}
+
+message LabelPointsProto {
+  repeated int64 ids = 1 [(scalapb.field).collection_type = "Array"];
+  repeated int32 labels = 2  [(scalapb.field).collection_type = "Array"];
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <bytecodeTargetLevel>
+      <module name="VoronoiSCAN.core.main" target="21" />
+      <module name="VoronoiSCAN.core.test" target="21" />
+      <module name="VoronoiSCAN.main" target="21" />
+      <module name="VoronoiSCAN.test" target="21" />
+      <module name="VoronoiSCAN.VoronoiSCAN.main" target="21" />
+      <module name="VoronoiSCAN.VoronoiSCAN.test" target="21" />
+      <module name="VoronoiSCAN.VoronoiSCANAkka.main" target="21" />
+      <module name="VoronoiSCAN.VoronoiSCANAkka.test" target="21" />
+    </bytecodeTargetLevel>
+  </component>
+</project>

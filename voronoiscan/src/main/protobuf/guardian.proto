@@ -1,0 +1,11 @@
+syntax = "proto3";
+package guardian;
+import "scalapb/scalapb.proto";
+
+option java_package = "guardian";
+option java_outer_classname = "GuardianProtos";
+
+message StopVoronoiSCANProto {
+  repeated int32 labels = 1 [
+    (scalapb.field).collection_type = "Array"];
+}

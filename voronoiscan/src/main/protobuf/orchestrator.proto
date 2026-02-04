@@ -1,0 +1,22 @@
+syntax = "proto3";
+import "scalapb/scalapb.proto";
+
+import "point.proto";
+import "kdtree.proto";
+option java_package = "orchestrator";
+option java_outer_classname = "OrchestratorProtos";
+
+package orchestrator;
+
+message ExtractedSamplesProto {
+  repeated data.PointProto samples = 1 [
+    (scalapb.field).collection_type = "Array"];
+  data.KDTreeProto kdTree = 2;
+}
+
+
+message FinishedGlobalMergeProto {
+  // Use int64 as key where the key is encoded as: (first << 32) | second
+  // This allows us to pack two int32 values into a single int64 key for the map
+  map<int64, int32> globalMergeResult = 1;
+}

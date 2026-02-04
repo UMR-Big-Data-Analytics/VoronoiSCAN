@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ScalaCompilerConfiguration">
+    <option name="separateProdTestSources" value="true" />
+    <profile name="sbt 1" modules="VoronoiSCAN,VoronoiSCAN.VoronoiSCAN,VoronoiSCAN.VoronoiSCAN.main,VoronoiSCAN.VoronoiSCAN.test,VoronoiSCAN.VoronoiSCANAkka,VoronoiSCAN.VoronoiSCANAkka.main,VoronoiSCAN.VoronoiSCANAkka.test,VoronoiSCAN.core,VoronoiSCAN.core.main,VoronoiSCAN.core.test,VoronoiSCAN.main,VoronoiSCAN.test,voronoiscan-gh_9681,voronoiscan-gh_9681.main,voronoiscan-gh_9681.test" />
+  </component>
+</project>

@@ -1,0 +1,18 @@
+syntax = "proto3";
+package epsilonmerge;
+
+option java_package = "epsilonmerge";
+option java_outer_classname = "EpsilonMergeProtos";
+
+import "localdbscanresult.proto";
+
+message PushDBSCANResultDtoProto {
+  dto.LocalDBSCANResultDtoProto clusteringResult = 1;
+}
+
+message PushDBSCANResultDtoChunkProto {
+  bytes chunk = 1;
+  int32 chunkIdx = 2;
+  int32 totalChunks = 3;
+  int32 cellIdx = 4; // Added cell index of the sender
+}

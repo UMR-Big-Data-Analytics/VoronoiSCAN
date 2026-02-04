@@ -1,0 +1,11 @@
+syntax = "proto3";
+package globalmerge;
+
+option java_package = "globalmerge";
+option java_outer_classname = "GlobalMergeProtos";
+
+import "localclusteringmerge.proto";
+
+message SendPairwiseMergeResultProto {
+  data.LocalClusteringMergeProto localClusteringMerge = 1;
+}
