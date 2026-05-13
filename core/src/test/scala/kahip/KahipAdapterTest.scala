@@ -7,6 +7,9 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.jdk.CollectionConverters._
 
+/** Comprehensive test suite for the KahipAdapter class. Tests various graph partitioning scenarios including simple
+ * graphs, edge cases, and different partitioning configurations.
+ */
 class KahipAdapterTest extends AnyFlatSpec with Matchers with Inside with TableDrivenPropertyChecks {
 
   behavior of "KahipAdapter Basic Partitioning"

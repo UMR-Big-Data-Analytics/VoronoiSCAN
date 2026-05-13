@@ -1,77 +1,90 @@
 package actors.sampler
 
+import actors.sampler.SampleHelper.{getPoints, getRandomSamples}
+import configuration.{InputConfiguration, SystemConfiguration}
 import data.{DelaunayGraph, Point}
+import delaunay.DelaunayGraphBuilder
 import spatial.index.KDTree
 import utils.Utils
 
-import java.io.RandomAccessFile
-import java.util.Random
-import scala.util.{Failure, Success, Using}
-
-class RandomSampler(seed: Option[Int] = None) extends CellSampler {
-
-  private val random = seed match {
-    case Some(s) => new Random(s)
-    case None => new Random()
-  }
+class RandomSampler(seed: Option[Int] = None, inputConfiguration: InputConfiguration) extends CellSampler {
 
   override def getCenters(
                            filePath: String,
                            numSamples: Int,
                            minDistance: Float
                          ): (Array[Point], KDTree, DelaunayGraph) = {
-    val lines = getRandomSamples(filePath, 500 * numSamples)
+    val lines = getRandomSamples(filePath, 500 * numSamples, seed)
     extractSamples(lines, numSamples, minDistance)
   }
 
-  private def extractSamples(lines: Array[String], numSamples: Int, minDistance: Float) = {
-    val vectors = lines.map { line =>
-      val values = line.split(",").map(_.toFloat)
-      values
-    }
-    val points = Utils.addPointIds(vectors)
-    val (centers, tree) = Utils.getSeedPoints(points, numSamples, minDistance)
-    val graph = delaunay.DelaunayGraphBuilder.buildDelaunayGraph(centers)
-    (centers, tree, graph)
-  }
+  private def extractSamples(
+                              lines: Array[String],
+                              numSamples: Int,
+                              minDistance: Float
+                            ): (Array[Point], KDTree, DelaunayGraph) = {
+    val numWorkers = SystemConfiguration.get.numWorkers
+    val points = getPoints(lines)
+    require(points.nonEmpty, "Cannot extract centers from an empty point set")
 
-  private def getRandomSamples(filepath: String, k: Int, encoding: String = "UTF-8"): Array[String] = {
-    Using(new RandomAccessFile(filepath, "r")) { raf =>
-      val fileSize = raf.length()
-      val samples  = new Array[String](k)
+    val qhullMinCells = points.head.dim + 1
+    val requiredCells = math.max(numWorkers, qhullMinCells)
+    val effectiveNumSamples = math.max(numSamples, requiredCells)
 
-      if (fileSize == 0) {
-        throw new IllegalStateException("Cannot sample from an empty file.")
-      }
+    var iterationCounter = 0
+    var bestResult: Option[(Array[Point], KDTree, DelaunayGraph)] = None
 
-      for (i <- 0 until k) {
-        var line: String = null
-        // Loop until a non-empty line is found. This handles seeking to the
-        // very end of the file where readLine() would return null.
-        while (line == null || line.trim.isEmpty) {
-          // Use the instance random instead of the global Random
-          val randomOffset = math.abs(random.nextLong()) % fileSize
-          raf.seek(randomOffset)
+    while (iterationCounter < 10) {
+      iterationCounter += 1
+      val (rawCenters, _) = Utils.getSeedPoints(points, effectiveNumSamples, minDistance)
 
-          //  Discard the first partial line, as we likely landed in the middle of it.
-          raf.readLine()
+      if (rawCenters.length < qhullMinCells) {
+        // qhull needs at least (dimension + 1) points to construct a simplex.
+      } else {
+        val rawGraph = DelaunayGraphBuilder.buildDelaunayGraph(rawCenters)
 
-          //  Read the next full line, which is our random sample.
-          line = raf.readLine()
-        }
-
-        val correctlyEncodedLine = new String(line.getBytes("ISO-8859-1"), encoding)
-        samples(i) = correctlyEncodedLine
-      }
-      samples
-    } match {
-      case Success(value) => value
-      case Failure(exception) =>
-        throw new RuntimeException(
-          s"Error while sampling $k lines from file $filepath: ${exception.getMessage}",
-          exception
+        val (centers, tree, graph) = CellContractor.mergeCloseCells(
+          rawCenters,
+          rawGraph,
+          inputConfiguration.minCellDistanceFactor * inputConfiguration.epsilon
         )
+        bestResult match {
+          case Some((bestCenter, _, _)) =>
+            if (centers.length > bestCenter.length) {
+              bestResult = Some((centers, tree, graph))
+            }
+          case None => bestResult = Some((centers, tree, graph))
+        }
+        if (centers.length >= requiredCells) {
+          return (centers, tree, graph)
+        }
+      }
     }
+
+    iterationCounter = 0
+    var minCellDistance = inputConfiguration.minCellDistanceFactor * inputConfiguration.epsilon
+    while (iterationCounter < 5) {
+      iterationCounter += 1
+      val (bestCenters, bestTree, bestGraph) =
+        bestResult.getOrElse(throw new RuntimeException("This should never happen"))
+      minCellDistance = minCellDistance * 0.95f
+      if (minCellDistance <= 2 * inputConfiguration.epsilon) {
+        return (bestCenters, bestTree, bestGraph)
+      }
+      val (centers, tree, graph) = CellContractor.mergeCloseCells(
+        bestCenters,
+        bestGraph,
+        minCellDistance
+      )
+      if (centers.length >= requiredCells) {
+        return (centers, tree, graph)
+      }
+    }
+
+    val bestCount = bestResult.map(_._1.length).getOrElse(0)
+    throw new RuntimeException(
+      s"Failed to produce enough cells for qhull/workers: required=$requiredCells (qhullMin=$qhullMinCells, workers=$numWorkers), best=$bestCount"
+    )
   }
 
 }

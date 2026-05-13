@@ -5,10 +5,10 @@ import akka.actor.typed.scaladsl.adapter._
 import akka.actor.typed.{ActorRef, ActorRefResolver}
 import akka.serialization.SerializerWithStringManifest
 import clusterer.clusterer.{AddPointsProto => PBAddPointsProto, DistributePointsProto => PBDistributePointsProto, LabelPointsProto => PBLabelPointsProto}
+import com.github.luben.zstd.Zstd
 import com.google.protobuf.ByteString
-import data.kdtree.{KDNodeProto => PBKDNodeProto, KDTreeProto => PBKDTreeProto}
 import data.localclusteringmerge.{LocalClusteringMergeProto => PBLocalClusteringMergeProto, MergeProto => PBMergeProto}
-import data.point.{PointCollectionProto => PBPointCollectionProto, PointIdCollectionProto => PBPointIdCollectionProto, PointProto => PBPointProto}
+import data.point.{PointIdCollectionProto => PBPointIdCollectionProto, PointProto => PBPointProto}
 import data.{Point => VSPoint}
 import dto.localdbscanresult.{LocalDBSCANResultDtoProto => PBLocalDBSCANResultDtoProto}
 import dto.{ClusterMapDto, LocalDBSCANResultDto}
@@ -19,10 +19,7 @@ import orchestrator.orchestrator.{FinishedGlobalMergeProto => PBFinishedGlobalMe
 import partitioner.partitioner.{PartitionPointsProto => PBPartitionPointsProto}
 import protocol._
 import serialization.LongHelper.{packIntPair, unpackIntPair}
-import spatial.index.KDTree
 import writer.writer.{LabeledPointsChunkProto => PBWriterLabeledPointsChunkProto}
-// Added import for Zstandard compression
-import com.github.luben.zstd.Zstd
 
 object LongHelper {
 
@@ -65,8 +62,7 @@ class ProtobufSerializer(system: ExtendedActorSystem) extends SerializerWithStri
 
   private val GlobalMergeSendPair = "globalmerge.SendPairwiseMergeResult"
 
-  // Compression configuration
-  private val defaultCompressionThreshold = 512
+  private val defaultCompressionThreshold = 1024000000 // 1 GB default threshold to disable compression for testing
 
   private val compressionThreshold: Int =
     try system.settings.config.getInt("voronoiscan.serialization.zstd.compression-threshold")
@@ -212,7 +208,6 @@ class ProtobufSerializer(system: ExtendedActorSystem) extends SerializerWithStri
     }
   }
 
-  // Compression helpers
   private def maybeCompress(payload: Array[Byte]): Array[Byte] = {
     if (payload.length < compressionThreshold) packUncompressed(payload)
     else {
@@ -269,60 +264,6 @@ object PointConv {
 
 }
 
-object KDTreeConv {
-
-  def toProto(tree: KDTree): PBKDTreeProto = {
-    PBKDTreeProto(
-      points = tree.points.map(PointConv.toProto), root = tree.root.map(KDNodeConv.toProto),
-      rebalanceThreshold = tree.rebalanceThreshold, insertions = tree.insertionCount, deletions = tree.deletionCount
-    )
-  }
-
-  def fromProto(pb: PBKDTreeProto): KDTree = {
-    val points = pb.points.map(PointConv.fromProto)
-    val depth  = if (pb.depth > 0) pb.depth else 10
-    val rbt    = if (pb.rebalanceThreshold > 0) pb.rebalanceThreshold else 100
-
-    // Create tree with new constructor signature
-    val tree = new KDTree(initialPoints = points, depth = depth, rebalanceThreshold = rbt)
-
-    // Set the root if it exists
-    pb.root.foreach(r => tree.root = Some(KDNodeConv.fromProto(r)))
-
-    // Restore insertion/deletion counts by performing dummy operations
-    val targetInsertions = if (pb.insertions > 0) pb.insertions else 0
-    val targetDeletions  = if (pb.deletions > 0) pb.deletions else 0
-
-    // We need to set the internal counters through reflection or provide a setter method
-    // For now, we'll build the tree and let the counters start at 0
-    tree.build()
-    tree
-  }
-
-  object KDNodeConv {
-
-    def toProto(node: spatial.index.KDNode): PBKDNodeProto =
-      PBKDNodeProto(
-        pointWithId = Some(PointConv.toProto(node.pointWithId)),
-        left = node.left.map(toProto),
-        right = node.right.map(toProto)
-      )
-
-    def fromProto(pb: PBKDNodeProto): spatial.index.KDNode = {
-      val left  = pb.left.map(fromProto)
-      val right = pb.right.map(fromProto)
-      val point = PointConv.fromProto(
-        pb.pointWithId.getOrElse(
-          throw new IllegalArgumentException("Missing point_with_id in KDNodeProto")
-        )
-      )
-      spatial.index.KDNode(point, left, right)
-    }
-
-  }
-
-}
-
 object ClusterMapConv {
 
   def toPackedIdsAndLabels(dto: ClusterMapDto): (Array[Long], Array[Int]) = {
@@ -362,9 +303,6 @@ object LocalDBSCANResultDtoConv {
     )
   }
 
-  private def toCollection(points: Array[VSPoint]): PBPointCollectionProto =
-    PBPointCollectionProto(points = points.map(PointConv.toProto))
-
   private def toCollection(pointIds: Array[Long]): PBPointIdCollectionProto =
     PBPointIdCollectionProto(pointIds = pointIds)
 
@@ -374,9 +312,6 @@ object LocalDBSCANResultDtoConv {
       borderPoints = pb.borderPoints.map(fromCollection), labelKeys = pb.labelKeys, labelValues = pb.labelValues
     )
   }
-
-  private def fromCollection(pb: PBPointCollectionProto): Array[VSPoint] =
-    pb.points.map(PointConv.fromProto)
 
   private def fromCollection(pb: PBPointIdCollectionProto): Array[Long] =
     pb.pointIds

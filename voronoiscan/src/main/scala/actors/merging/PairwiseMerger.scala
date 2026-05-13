@@ -1,16 +1,38 @@
 package actors.merging
 
-import components.union_find.StaticUnionFind
+import components.union_find.{LockFreeUnionFind, StaticUnionFind, UnionFind}
 import data.LocalClusteringMerge
 import dto.LocalDBSCANResultDto
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.parallel.CollectionConverters._
 
 object PairwiseMerger {
 
-  def merge(left: LocalDBSCANResultDto, right: LocalDBSCANResultDto): LocalClusteringMerge = {
+  private val parallelEdgeThreshold = 20000
+
+  private val parallelBucketSize = 4096
+
+  sealed trait MergeMode
+
+  private case object Auto extends MergeMode
+
+  private case object Sequential extends MergeMode
+
+  private case object Parallel extends MergeMode
+
+  def merge(left: LocalDBSCANResultDto, right: LocalDBSCANResultDto): LocalClusteringMerge =
+    merge(left, right, Auto)
+
+  def merge(
+             left: LocalDBSCANResultDto,
+             right: LocalDBSCANResultDto,
+             mode: MergeMode,
+             bucketSize: Int = parallelBucketSize,
+             edgeThreshold: Int = parallelEdgeThreshold
+           ): LocalClusteringMerge = {
     require(
       left.corePoints.length == left.borderPoints.length,
       s"Left corePoints/borderPoints mismatch: ${left.corePoints.length} != ${left.borderPoints.length}"
@@ -31,11 +53,9 @@ object PairwiseMerger {
     val leftK = left.corePoints.length
     val rightK = right.corePoints.length
     val totalSize = leftK + rightK
-    val uf = new StaticUnionFind((0 until totalSize).toSet)
+    val allVertices = (0 until totalSize).toSet
 
-    // Index Left Points
     val leftPointToCluster = new Long2IntOpenHashMap()
-    // Add Left Cores
     for (i <- left.corePoints.indices) {
       val pts = left.corePoints(i)
       var k = 0
@@ -44,7 +64,6 @@ object PairwiseMerger {
         k += 1
       }
     }
-    // Add Left Borders
     for (i <- left.borderPoints.indices) {
       val pts = left.borderPoints(i)
       var k = 0
@@ -54,9 +73,7 @@ object PairwiseMerger {
       }
     }
 
-    // Index Right Points
     val rightPointToCluster = new Long2IntOpenHashMap()
-    // Add Right Cores
     for (j <- right.corePoints.indices) {
       val pts = right.corePoints(j)
       var k = 0
@@ -65,7 +82,6 @@ object PairwiseMerger {
         k += 1
       }
     }
-    // Add Right Borders
     for (j <- right.borderPoints.indices) {
       val pts = right.borderPoints(j)
       var k = 0
@@ -75,45 +91,60 @@ object PairwiseMerger {
       }
     }
 
-    // Point is Core in LEFT (and exists in Right as Core or Border)
+    val mergeEdges = ArrayBuffer.empty[(Int, Int)]
+
     for (i <- left.corePoints.indices) {
       val pts = left.corePoints(i)
       var k = 0
       while (k < pts.length) {
         val pid = pts(k)
         if (rightPointToCluster.containsKey(pid)) {
-          val leftIdx = i
-          val rightIdx = rightPointToCluster.get(pid)
-
-          val u = leftIdx
-          val v = rightIdx + leftK
-          if (uf.find(u) != uf.find(v)) {
-            uf.union(u, v)
-          }
+          mergeEdges.addOne(i -> (rightPointToCluster.get(pid) + leftK))
         }
         k += 1
       }
     }
 
-    // Point is Core in RIGHT (and exists in Left as Core or Border)
     for (j <- right.corePoints.indices) {
       val pts = right.corePoints(j)
       var k = 0
       while (k < pts.length) {
         val pid = pts(k)
         if (leftPointToCluster.containsKey(pid)) {
-          val rightIdx = j
-          val leftIdx = leftPointToCluster.get(pid)
-
-          val u = leftIdx
-          val v = rightIdx + leftK
-          if (uf.find(u) != uf.find(v)) {
-            uf.union(u, v)
-          }
+          mergeEdges.addOne(leftPointToCluster.get(pid) -> (j + leftK))
         }
         k += 1
       }
     }
+
+    val shouldRunParallel = mode match {
+      case Parallel => Runtime.getRuntime.availableProcessors() > 1
+      case Sequential => false
+      case Auto => Runtime.getRuntime.availableProcessors() > 1 && mergeEdges.length >= edgeThreshold
+    }
+
+    val uf: UnionFind[Int] =
+      if (shouldRunParallel) {
+        val parallelUf = new LockFreeUnionFind[Int](allVertices)
+        for (batch <- mergeEdges.grouped(bucketSize)) {
+          batch.toVector.par.foreach { case (u, v) =>
+            val ru = parallelUf.find(u)
+            val rv = parallelUf.find(v)
+            if (ru != rv) {
+              parallelUf.union(ru, rv)
+            }
+          }
+        }
+        parallelUf
+      } else {
+        val sequentialUf = new StaticUnionFind[Int](allVertices)
+        mergeEdges.foreach { case (u, v) =>
+          if (sequentialUf.find(u) != sequentialUf.find(v)) {
+            sequentialUf.union(u, v)
+          }
+        }
+        sequentialUf
+      }
 
     val rootToComponentIdx = mutable.Map.empty[Int, Int]
     var componentIdx       = 0
@@ -133,13 +164,12 @@ object PairwiseMerger {
     }
 
     val merges: collection.Set[(collection.Set[Int], collection.Set[Int])] =
-      components.flatMap { component =>
+      components.par.flatMap { component =>
         val leftClusters = mutable.Set.empty[Int]
         val rightClusters = mutable.Set.empty[Int]
 
         component.foreach { vid =>
           if (vid < leftK) {
-            // Check Core first, then Border to find a representative point for the label lookup
             val pts =
               if (left.corePoints(vid).nonEmpty) left.corePoints(vid)
               else left.borderPoints(vid)
@@ -163,7 +193,7 @@ object PairwiseMerger {
           Some(leftClusters.toSet -> rightClusters.toSet)
         else
           None
-      }.toSet
+      }.seq.toSet
 
     LocalClusteringMerge(left.cellIdx, right.cellIdx, merges)
   }

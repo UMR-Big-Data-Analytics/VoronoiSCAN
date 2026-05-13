@@ -8,6 +8,7 @@
     <option name="classpathModifications">
       <list />
     </option>
+    <option name="defaultTargetName" />
     <option name="envFilePaths">
       <list />
     </option>
@@ -22,6 +23,32 @@
     </option>
     <option name="testKind" value="All in package" />
     <option name="workingDirectory" value="$PROJECT_DIR$" />
+    <option name="classBuf">
+      <list>
+        <option value="cluster.DBSCANCorrectnessTest" />
+        <option value="cluster.DBSCANGridTest" />
+        <option value="cluster.ParDBSCANGridTest" />
+        <option value="components.ConnectedComponentsTest" />
+        <option value="components.StreamingConnectedComponentsTest" />
+        <option value="delaunay.DelaunayGraphBuilderTest" />
+        <option value="data.DelaunayGraphCSRTransformerTest" />
+        <option value="kahip.KahipAdapterTest" />
+        <option value="nodedistribution.KaHIPNodeDistributorTest" />
+        <option value="actors.dbscan.DBSCANAkkaEdgeCasesTest" />
+        <option value="actors.dbscan.DBSCANAkkaTest" />
+        <option value="qhull.QhullAdapterTest" />
+        <option value="api.VoronoiSCANAkkaTest" />
+        <option value="metrics.MutualInformationTest" />
+        <option value="spatial.index.KDTreeTest" />
+        <option value="spatial.index.ParKDTreeTest" />
+        <option value="spatial.index.ParQuadTreeTest" />
+        <option value="spatial.index.QuadTreeTest" />
+        <option value="dto.ClusterMapDtoTest" />
+        <option value="dto.ExtendedVoronoiCellDtoTest" />
+        <option value="dto.VoronoiCellCollectionDtoTest" />
+        <option value="dto.VoronoiCellDtoTest" />
+      </list>
+    </option>
     <option name="javaOptions" value="--enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -Djava.library.path=lib" />
     <option name="shortenClasspath" value="NONE" />
     <option name="workingDirectory" value="$PROJECT_DIR$" />

@@ -1,13 +1,18 @@
 package qhull
 
-import org.scalatest.{Inside, OptionValues, TryValues}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
+import org.scalatest.{Inside, OptionValues, TryValues}
 
 import scala.jdk.CollectionConverters._
 import scala.util.{Random, Try}
 
+/** Comprehensive test suite for the QhullAdapter class.
+ *
+ * Note: Qhull may encounter precision errors with certain geometric configurations. These tests are designed to be
+ * robust against such issues.
+ */
 class QhullAdapterTest
     extends AnyFlatSpec
     with Matchers
@@ -16,10 +21,12 @@ class QhullAdapterTest
     with OptionValues
     with TryValues {
 
+  // Helper method to check if a triangulation result is valid
   def isValidTriangulation(result: QhullAdapter.QhullResult): Boolean = {
     if (result == null || result.adjacency() == null) return false
     if (result.adjacency().isEmpty) return true // Empty is valid for empty input
 
+    // Check symmetry - for every edge a->b, there must be b->a
     result.adjacency().asScala.forall { case (a, neighbors) =>
       neighbors.asScala.forall { b =>
         Option(result.adjacency().get(b)).exists(_.contains(a))
@@ -27,6 +34,7 @@ class QhullAdapterTest
     }
   }
 
+  // Helper method to safely run triangulation and handle potential failures
   def safeTriangulation(points: Array[Array[Double]]): Option[QhullAdapter.QhullResult] = {
     val result = Try(QhullAdapter.delaunayTriangulation(points)).toOption
     result.filter(isValidTriangulation)
@@ -35,6 +43,7 @@ class QhullAdapterTest
   behavior of "QhullAdapter 2D Delaunay Triangulation"
 
   it should "compute triangulation for a simple square with center point" in {
+    // Square with a center point - with slight perturbation to avoid precision issues
     val points = Array(
       Array(0.0, 0.0),
       Array(1.001, 0.0),
@@ -94,6 +103,7 @@ class QhullAdapterTest
   }
 
   it should "handle collinear points correctly" in {
+    // Add a small perturbation to avoid perfect collinearity which causes Qhull precision issues
     val points = Array(
       Array(0.0, 0.0),
       Array(1.0, 0.001),
@@ -153,6 +163,7 @@ class QhullAdapterTest
   behavior of "QhullAdapter 3D Delaunay Triangulation"
 
   it should "compute triangulation for a simple tetrahedron" in {
+    // Regular tetrahedron with slight perturbation to avoid precision issues
     val points = Array(
       Array(0.0, 0.0, 0.0),
       Array(1.001, 0.002, 0.001),
@@ -181,6 +192,7 @@ class QhullAdapterTest
   }
 
   it should "compute triangulation for a cube with center point" in {
+    // Cube vertices plus center with perturbations to avoid precision issues
     val points = Array(
       Array(0.001, 0.002, -0.001), // 0 - slightly perturbed (0,0,0)
       Array(1.003, -0.001, 0.002), // 1 - slightly perturbed (1,0,0)
@@ -231,13 +243,19 @@ class QhullAdapterTest
   it should "handle a single point" in {
     val points = Array(Array(1.0, 2.0))
 
+    // Use direct call instead of safeTriangulation since this is testing the edge case handling
+    // in the QhullAdapter implementation, not the Qhull algorithm itself
     val result = QhullAdapter.delaunayTriangulation(points)
 
     result should not be null
+    // Check if adjacency map contains the single point (index 0)
+    // Note: The adjacency map might be empty if Qhull fails, which is expected and handled by QhullAdapter
     result.adjacency() should not be null
 
+    // We just need to verify that the result is valid (either empty map or contains point 0)
     if (!result.adjacency().isEmpty) {
       result.adjacency().containsKey(0) shouldBe true
+      // A single point should have no connections
       result.adjacency().get(0).isEmpty shouldBe true
     }
   }
@@ -245,13 +263,17 @@ class QhullAdapterTest
   it should "handle two points" in {
     val points = Array(Array(0.0, 0.0), Array(1.0, 1.0))
 
+    // Use direct call to test the edge case handling in QhullAdapter
     val result = QhullAdapter.delaunayTriangulation(points)
 
     result should not be null
     result.adjacency() should not be null
 
+    // The result might be empty if Qhull fails, which is acceptable
+    // We only assert on non-empty results
     if (!result.adjacency().isEmpty) {
       if (result.adjacency().containsKey(0) && result.adjacency().containsKey(1)) {
+        // If both points are in the adjacency map, they should be connected to each other
         result.adjacency().get(0).contains(1) shouldBe true
         result.adjacency().get(1).contains(0) shouldBe true
       }
@@ -261,6 +283,7 @@ class QhullAdapterTest
   behavior of "QhullAdapter Float Points"
 
   it should "handle float points conversion" in {
+    // Test with perturbations to avoid precision issues
     val floatPoints = Array(
       Array(0.01f, -0.01f),
       Array(1.02f, 0.01f),
@@ -270,6 +293,7 @@ class QhullAdapterTest
 
     val resultOpt = safeTriangulation(floatPoints.map(_.map(_.toDouble)))
 
+    // If triangulation succeeded, verify basic properties
     if (resultOpt.isDefined) {
       val result = resultOpt.value
       result.adjacency().size() shouldBe 4
@@ -284,6 +308,7 @@ class QhullAdapterTest
   }
 
   it should "produce similar results for float and double inputs when possible" in {
+    // Use points that are less likely to cause precision issues
     val floatPoints = Array(
       Array(0.1f, 0.2f),
       Array(10.1f, 0.3f),
@@ -296,6 +321,7 @@ class QhullAdapterTest
     val floatResultOpt  = safeTriangulation(floatPoints.map(_.map(_.toDouble)))
     val doubleResultOpt = safeTriangulation(doublePoints)
 
+    // Only verify if both results are valid
     if (floatResultOpt.isDefined && doubleResultOpt.isDefined) {
       val floatResult  = floatResultOpt.value
       val doubleResult = doubleResultOpt.value
@@ -314,6 +340,7 @@ class QhullAdapterTest
   behavior of "QhullAdapter Graph Properties"
 
   it should "create symmetric connections" in {
+    // Square with center point - with perturbation to avoid precision issues
     val points = Array(
       Array(0.0, 0.0),
       Array(1.001, 0.0),
@@ -336,6 +363,7 @@ class QhullAdapterTest
   }
 
   it should "not create self-loops" in {
+    // Square with center point - with perturbation to avoid precision issues
     val points = Array(
       Array(0.0, 0.0),
       Array(1.001, 0.0),

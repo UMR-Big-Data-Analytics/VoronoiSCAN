@@ -2,7 +2,7 @@ package actors.stats
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, TimerScheduler}
-import configuration.InputConfiguration
+import configuration.{InputConfiguration, SystemConfiguration}
 import metrics.MetricWriter
 import metrics.entity.{ClusterParameters, DatasetParameters, Measurement}
 import protocol.StatsProtocol
@@ -11,6 +11,7 @@ import java.io.{File, FileWriter, PrintWriter}
 import java.nio.file.Path
 import java.time.format.DateTimeFormatter
 import java.time.{Duration, Instant, LocalDateTime}
+import java.util
 import scala.concurrent.duration.DurationInt
 import scala.util.{Try, Using}
 
@@ -34,9 +35,20 @@ class Stats private (
     inputConfiguration: InputConfiguration
 ) {
 
-  private val path = Path.of(inputConfiguration.metricsPath).toAbsolutePath.toString
-
   import Stats._
+
+  private val datasetName = inputConfiguration.inputPath.split("/").last.split("\\.").head
+
+  private val algoName = "VoronoiSCAN-" + inputConfiguration.dbscanImpl
+
+  private val path = Path
+    .of(
+      inputConfiguration.metricsPath + "/" + datasetName + "/" + algoName + "/" + inputConfiguration.epsilon + "_" + inputConfiguration.minPts
+    )
+    .toAbsolutePath
+    .toString
+
+  private val numNodes: Int = SystemConfiguration.get.numWorkers
 
   private val partitioningCsvPath = s"$path/partitioning_times.csv"
 
@@ -62,12 +74,22 @@ class Stats private (
 
   private var totalStartTime: Option[Instant] = None
 
+  private var numEffectivePartitions = 0L
+
+  private var sentNetworkPoints = 0L
+
+  private var sentNetworkEdges = 0L
+
   def behavior: Behavior[StatsProtocol.StatsRequest] = {
     Behaviors.receiveMessage {
-      case StatsProtocol.ReportDelaunayComputationTime(startTime, endTime, numPoints, numDimensions) =>
+      case StatsProtocol.ReportDelaunayComputationTime(startTime, endTime, numPoints, numDimensions, cpuTimeMs) =>
         val durationMs = Duration.between(startTime, endTime).toMillis
-        // start_time,end_time,duration_ms,num_points,num_dimensions
-        appendLine(delaunayComputationCsvPath, s"$startTime,$endTime,$durationMs,$numPoints,$numDimensions")
+        val commTimeMs = durationMs - cpuTimeMs
+        // num_nodes,start_time,end_time,duration_ms,cpu_time_ms,communication_time_ms,num_points,num_dimensions
+        appendLine(
+          delaunayComputationCsvPath,
+          s"$numNodes,$startTime,$endTime,$durationMs,$cpuTimeMs,$commTimeMs,$numPoints,$numDimensions"
+        )
         Behaviors.same
 
       case StatsProtocol.ReportTotalStartTime(startTime) =>
@@ -80,11 +102,19 @@ class Stats private (
           // start_time,end_time,duration_ms
           appendLine(totalExecutionCsvPath, s"$startTime,$endTime,$durationMs")
 
-          val path        = Path.of(inputConfiguration.metricsPath)
-          val writer      = new MetricWriter(path)
-          val datasetName = inputConfiguration.inputPath.split("/").last.split("\\.").head
+          val path = Path.of(inputConfiguration.metricsPath)
+          val writer = new MetricWriter(path)
+          val additionalMetrics = new util.HashMap[String, Any]()
+          val numPartitionMerges = inputConfiguration.numCells - numEffectivePartitions
+          additionalMetrics.put("numEffectivePartitions", numEffectivePartitions)
+          additionalMetrics.put("numPartitionMerges", numPartitionMerges)
+          additionalMetrics.put("numNodes", numNodes)
+          additionalMetrics.put("numDesiredPartitions", inputConfiguration.numCells)
+          additionalMetrics.put("exchangedPartitioningPoints", sentNetworkPoints)
+          additionalMetrics.put("exchangedMergingEdges", sentNetworkEdges)
+
           val measurement = new Measurement[ClusterParameters, DatasetParameters](
-            "VoronoiSCAN-" + inputConfiguration.dbscanImpl,
+            algoName,
             durationMs,
             new ClusterParameters(
               inputConfiguration.epsilon,
@@ -92,63 +122,85 @@ class Stats private (
             ),
             new DatasetParameters(
               datasetName
-            )
+            ),
+            additionalMetrics
           )
+          context.log.info(s"Writing metrics to $path")
           writer.writeMetrics(measurement)
         }
         Behaviors.same
 
-      case StatsProtocol.ReportPartitioningTime(startTime, endTime, numPoints, cpuTimeMs) =>
-        writeToCsv(partitioningCsvPath, startTime, endTime, s"$numPoints,$cpuTimeMs")
+      case StatsProtocol.ReportPartitioningTime(startTime, endTime, numPoints, cpuTimeMs, sentNetworkPoints) =>
+        this.sentNetworkPoints += sentNetworkPoints
+        writeToCsv(partitioningCsvPath, startTime, endTime, cpuTimeMs, s"$numPoints, $sentNetworkPoints")
         Behaviors.same
 
-      case StatsProtocol.ReportEpsilonExtensionTime(clustererId, startTime, endTime, cpuTime, pointsSent,
-            pointsReceived, numIterations) =>
+      case StatsProtocol.ReportEpsilonExtensionTime(clustererId, startTime, endTime, cpuTimeMs, pointsSent,
+        pointsReceived, numIterations, numPointsInCell) =>
+        numEffectivePartitions += 1
         if (startTime == null) {
           // When explicitly using grid partitioning (for experiments only), the start time may be null when no points
           // are assigned to a clusterer. In this case, we skip logging.
           Behaviors.same
         } else {
           val durationMs = Duration.between(startTime, endTime).toMillis
+          val commTimeMs = durationMs - cpuTimeMs
           val timestamp = getCurrentTimestamp
-          // timestamp,clusterer_id,start_time,end_time,cpu_time,duration_ms,points_sent,points_received,num_iterations
+          // num_nodes,timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms,points_sent,points_received,num_iterations,num_points_in_cell
           appendLine(
             epsilonExtensionCsvPath,
-            s"$timestamp,$clustererId,$startTime,$endTime,$cpuTime,$durationMs,$pointsSent,$pointsReceived,$numIterations"
+            s"$numNodes,$timestamp,$clustererId,$startTime,$endTime,$cpuTimeMs,$durationMs,$commTimeMs,$pointsSent,$pointsReceived,$numIterations,$numPointsInCell"
           )
           Behaviors.same
         }
 
       case StatsProtocol.ReportEpsilonExtensionGlobalTime(startTime, endTime) =>
-        writeToCsv(epsilonExtensionGlobalCsvPath, startTime, endTime, "")
+        writeToCsvNoCompute(epsilonExtensionGlobalCsvPath, startTime, endTime, "")
         Behaviors.same
 
       case StatsProtocol.ReportClusteringTime(clustererId, startTime, endTime, numPoints, cpuTimeMs) =>
         val durationMs = Duration.between(startTime, endTime).toMillis
+        val commTimeMs = durationMs - cpuTimeMs
         val timestamp  = getCurrentTimestamp
-        // timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,num_points
-        appendLine(clusteringCsvPath, s"$timestamp,$clustererId,$startTime,$endTime,$cpuTimeMs,$durationMs,$numPoints")
+        // num_nodes,timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms,num_points
+        appendLine(
+          clusteringCsvPath,
+          s"$numNodes,$timestamp,$clustererId,$startTime,$endTime,$cpuTimeMs,$durationMs,$commTimeMs,$numPoints"
+        )
         Behaviors.same
 
-      case StatsProtocol.ReportEpsilonMergingTime((clusterA, clusterB), startTime, endTime, cpuTimeMs) =>
+      case StatsProtocol.ReportEpsilonMergingTime(
+        (clusterA, clusterB),
+        startTime,
+        endTime,
+        cpuTimeMs,
+        sentNetworkEdges
+      ) =>
         val durationMs = Duration.between(startTime, endTime).toMillis
+        val commTimeMs = durationMs - cpuTimeMs
         val timestamp  = getCurrentTimestamp
-        // timestamp,cluster_a,cluster_b,start_time,end_time,cpu_time_ms,duration_ms
+        this.sentNetworkEdges += sentNetworkEdges
+        // num_nodes,timestamp,cluster_a,cluster_b,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms
         appendLine(
           epsilonMergingCsvPath,
-          s"$timestamp,$clusterA,$clusterB,$startTime,$endTime,$cpuTimeMs,$durationMs"
+          s"$numNodes,$timestamp,$clusterA,$clusterB,$startTime,$endTime,$cpuTimeMs,$durationMs,$commTimeMs"
         )
         Behaviors.same
 
       case StatsProtocol.ReportGlobalMergingTime(startTime, endTime, numLocalMerges, cpuTimeMs) =>
-        writeToCsv(globalMergingCsvPath, startTime, endTime, s"$numLocalMerges,$cpuTimeMs")
+        writeToCsv(globalMergingCsvPath, startTime, endTime, cpuTimeMs, s"$numLocalMerges")
         Behaviors.same
 
-      case StatsProtocol.ReportLabelingTime(clustererId, startTime, endTime, cpuTimeMs) =>
+      case StatsProtocol.ReportLabelingTime(clustererId, startTime, endTime, cpuTimeMs, sentNetworkPoints) =>
         val durationMs = Duration.between(startTime, endTime).toMillis
+        val commTimeMs = durationMs - cpuTimeMs
         val timestamp  = getCurrentTimestamp
-        // timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms
-        appendLine(labelingCsvPath, s"$timestamp,$clustererId,$startTime,$endTime,$cpuTimeMs,$durationMs")
+        this.sentNetworkPoints += sentNetworkPoints
+        // num_nodes,timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms
+        appendLine(
+          labelingCsvPath,
+          s"$numNodes,$timestamp,$clustererId,$startTime,$endTime,$cpuTimeMs,$durationMs,$commTimeMs,$sentNetworkPoints"
+        )
         Behaviors.same
 
       case StatsProtocol.ReportSystemLoad() =>
@@ -172,6 +224,7 @@ class Stats private (
 
   private def appendLine(filePath: String, line: String): Unit = {
     Try {
+      ensureParentDirectory(filePath)
       Using(new PrintWriter(new FileWriter(filePath, true))) { writer =>
         writer.println(line)
       }
@@ -180,10 +233,37 @@ class Stats private (
     }
   }
 
-  private def writeToCsv(filePath: String, startTime: Instant, endTime: Instant, additionalData: String): Unit = {
+  private def writeToCsv(
+                          filePath: String,
+                          startTime: Instant,
+                          endTime: Instant,
+                          cpuTimeMs: Long,
+                          additionalData: String
+                        ): Unit = {
+    val durationMs = Duration.between(startTime, endTime).toMillis
+    val commTimeMs = durationMs - cpuTimeMs
+    val timestamp = getCurrentTimestamp
+    val data =
+      if (additionalData.nonEmpty)
+        s"$numNodes,$timestamp,$startTime,$endTime,$durationMs,$cpuTimeMs,$commTimeMs,$additionalData"
+      else
+        s"$numNodes,$timestamp,$startTime,$endTime,$durationMs,$cpuTimeMs,$commTimeMs"
+    appendLine(filePath, data)
+  }
+
+  private def writeToCsvNoCompute(
+                                   filePath: String,
+                                   startTime: Instant,
+                                   endTime: Instant,
+                                   additionalData: String
+                                 ): Unit = {
     val durationMs = Duration.between(startTime, endTime).toMillis
     val timestamp  = getCurrentTimestamp
-    val data       = s"$timestamp,$startTime,$endTime,$durationMs,$additionalData"
+    val data =
+      if (additionalData.nonEmpty)
+        s"$numNodes,$timestamp,$startTime,$endTime,$durationMs,$additionalData"
+      else
+        s"$numNodes,$timestamp,$startTime,$endTime,$durationMs"
     appendLine(filePath, data)
   }
 
@@ -193,37 +273,61 @@ class Stats private (
   timerScheduler.startTimerAtFixedRate(SYSTEM_LOAD_TIMER, StatsProtocol.ReportSystemLoad(), 100.milliseconds)
 
   private def initializeCsvFiles(): Unit = {
-    val dir = new File(s"${inputConfiguration.metricsPath}")
-    if (!dir.exists()) {
-      dir.mkdirs()
+    val runDir = new File(path)
+    if (!runDir.exists()) {
+      runDir.mkdirs()
     } else {
-      context.log.info("Stats directory {} already exists. Overwriting", dir.getPath)
-      dir.delete()
-      dir.mkdirs()
+      context.log.info("Stats run directory {} already exists. Overwriting CSV files", runDir.getPath)
     }
-    writeHeader(partitioningCsvPath, "timestamp,start_time,end_time,duration_ms,num_points,cpu_time_ms")
+    writeHeader(
+      partitioningCsvPath,
+      "num_nodes,timestamp,start_time,end_time,duration_ms,cpu_time_ms,communication_time_ms,num_points"
+    )
     writeHeader(
       epsilonExtensionCsvPath,
-      "timestamp,clusterer_id,start_time,end_time,cpu_time,duration_ms,points_sent,points_received,num_iterations"
+      "num_nodes,timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms,points_sent,points_received,num_iterations,num_points_in_cell"
     )
-    writeHeader(epsilonExtensionGlobalCsvPath, "timestamp,start_time,end_time,duration_ms")
-    writeHeader(clusteringCsvPath, "timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,num_points")
-    writeHeader(epsilonMergingCsvPath, "timestamp,cluster_a,cluster_b,start_time,end_time,cpu_time_ms,duration_ms")
-    writeHeader(globalMergingCsvPath, "timestamp,start_time,end_time,duration_ms,num_local_merges,cpu_time_ms")
-    writeHeader(labelingCsvPath, "timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms")
+    writeHeader(epsilonExtensionGlobalCsvPath, "num_nodes,timestamp,start_time,end_time,duration_ms")
+    writeHeader(
+      clusteringCsvPath,
+      "num_nodes,timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms,num_points"
+    )
+    writeHeader(
+      epsilonMergingCsvPath,
+      "num_nodes,timestamp,cluster_a,cluster_b,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms"
+    )
+    writeHeader(
+      globalMergingCsvPath,
+      "num_nodes,timestamp,start_time,end_time,duration_ms,cpu_time_ms,communication_time_ms,num_local_merges"
+    )
+    writeHeader(
+      labelingCsvPath,
+      "num_nodes,timestamp,clusterer_id,start_time,end_time,cpu_time_ms,duration_ms,communication_time_ms"
+    )
     writeHeader(systemLoad, "timestamp,cpu_usage_percent,memory_used_mb,memory_total_mb,memory_used_percent")
     writeHeader(totalExecutionCsvPath, "start_time,end_time,duration_ms")
-    writeHeader(delaunayComputationCsvPath, "start_time,end_time,duration_ms,num_points,num_dimensions")
+    writeHeader(
+      delaunayComputationCsvPath,
+      "num_nodes,start_time,end_time,duration_ms,cpu_time_ms,communication_time_ms,num_points,num_dimensions"
+    )
   }
 
   private def writeHeader(filePath: String, header: String): Unit = {
     val file = new File(filePath)
     Try {
+      ensureParentDirectory(filePath)
       Using(new PrintWriter(new FileWriter(file))) { writer =>
         writer.println(header)
       }
     }.recover { case ex =>
       context.log.error(s"Failed to write header to $filePath", ex)
+    }
+  }
+
+  private def ensureParentDirectory(filePath: String): Unit = {
+    val parent = new File(filePath).getParentFile
+    if (parent != null && !parent.exists()) {
+      parent.mkdirs()
     }
   }
 

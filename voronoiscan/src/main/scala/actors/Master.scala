@@ -28,7 +28,6 @@ class Master private (guardian: ActorRef[GuardianProtocol.GuardianRequest], poin
       val listingResponseAdapter = context.messageAdapter(MasterProtocol.ReceptionistListingMessage(_))
       context.system.receptionist ! Receptionist.subscribe(Worker.serviceKey, listingResponseAdapter)
       context.log.info("Master actor started")
-      // Reaper.watchWithDefaultReaper(context.self)
 
       val writer = context.spawn(
         Writer(pointSink),

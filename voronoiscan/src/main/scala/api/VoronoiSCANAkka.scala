@@ -37,10 +37,8 @@ class VoronoiSCANAkka(parametersOption: Option[InputConfiguration] = None) exten
     val system =
       ActorSystem(Guardian(params), SystemConfiguration.get.actorSystemName, SystemConfiguration.get.toAkkaConfig)
 
-    // Set timeout for ask pattern
     implicit val timeout: Timeout     = executionTimeout
     implicit val scheduler: Scheduler = system.scheduler
-    // Import the execution context for the ask pattern
     import system.executionContext
     val futureLabels: Future[GuardianProtocol.StopVoronoiSCAN] =
       system.ask(ref => GuardianProtocol.ExecuteVoronoiSCAN(Some(ref)))

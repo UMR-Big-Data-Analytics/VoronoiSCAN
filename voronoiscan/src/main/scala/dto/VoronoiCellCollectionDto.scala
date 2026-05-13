@@ -7,7 +7,7 @@ import scala.collection.mutable
 object VoronoiCellCollectionDto {
 
   def apply(cells: Array[VoronoiCell], subset: Set[Int]): VoronoiCellCollectionDto = {
-    val cellDtos = cells.map(c => VoronoiCellDto(c)).toArray
+    val cellDtos = cells.map(c => VoronoiCellDto(c))
     new VoronoiCellCollectionDto(cellDtos, subset)
   }
 

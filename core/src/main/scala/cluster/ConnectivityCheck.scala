@@ -11,15 +11,18 @@ sealed class ConnectivityCheck(parallel: Boolean) {
                    epsilon: Float
                  ): Boolean = {
 
-    // Get only the core points from each cell
+    // 1. Get only the core points from each cell. This is a critical first step.
+    // Parallelization here is usually slower
     val corePointsG = g.getPoints.filter(p => coreFlags.getOrElse(p.id.toInt, false))
     val corePointsH = h.getPoints.filter(p => coreFlags.getOrElse(p.id.toInt, false))
 
+    // 2. Early exit if one of the cells has no core points.
     if (corePointsG.isEmpty || corePointsH.isEmpty) {
       return false
     }
 
-    //  Identify the smaller set to iterate over and the larger cell to query against
+    // 3. Identify the smaller set to iterate over and the larger cell to query against.
+    // This minimizes the number of expensive range queries.
     val (smallerSet, largerCell) = if (corePointsG.length < corePointsH.length) {
       (corePointsG, h)
     } else {

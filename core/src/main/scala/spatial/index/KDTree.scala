@@ -14,6 +14,7 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
   def this(initialPoints: Array[Point], depth: Int, rebalanceThreshold: Int) =
     this(ArrayBuffer.from(initialPoints), depth, rebalanceThreshold)
 
+  // Added convenience constructor with default depth and rebalanceThreshold
   def this(initialPoints: Array[Point]) = this(ArrayBuffer.from(initialPoints), 10, 100)
 
   require(initialPoints.nonEmpty, "Points collection must not be empty")
@@ -60,8 +61,10 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     if (root.isEmpty) return Array.empty
 
     val rangeSq = range.toDouble * range.toDouble
+    // Declare buffer locally to ensure thread safety
     val resultBuffer = ArrayBuffer.empty[Point]
 
+    // Use iterative approach for better performance
     val nodeStack = ArrayBuffer.empty[(KDNode, Int)]
     nodeStack.addOne((root.get, 0))
 
@@ -75,6 +78,7 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
       val splitVal = node.pointWithId.vector(axis)
       val queryVal = anchorPoint(axis)
 
+      // More efficient range checking with early bounds check
       val rangeDiff = range.toDouble
       if (queryVal - rangeDiff <= splitVal && node.left.isDefined) {
         nodeStack.addOne((node.left.get, depth + 1))
@@ -87,6 +91,7 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     resultBuffer.toArray
   }
 
+  // Efficient count-only version avoiding materializing result points
   override def rangeCount(anchorPoint: Embedding, range: Float): Int = {
     if (root.isEmpty) return 0
     val rangeSq   = range.toDouble * range.toDouble
@@ -117,6 +122,7 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
 
     val axis = depth % k
 
+    // Use intro-select for better worst-case performance
     val medianIndex = points.length / 2
     introSelectInPlace(points, medianIndex, axis, 0, points.length - 1, depth)
 
@@ -133,6 +139,7 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     )
   }
 
+  // Improved selection algorithm with hybrid approach (intro-select)
   private def introSelectInPlace(
                                   points: Array[Point],
                                   targetIndex: Int,
@@ -153,7 +160,9 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
           val pivotIndex    = medianOfThree(points, l, h, axis)
           val newPivotIndex = partitionArray(points, l, h, pivotIndex, axis)
 
-          if (newPivotIndex == target) {} else if (newPivotIndex > target) {
+          if (newPivotIndex == target) {
+            // Found the target
+          } else if (newPivotIndex > target) {
             introSelectRec(l, newPivotIndex - 1, target, depth - 1)
           } else {
             introSelectRec(newPivotIndex + 1, h, target, depth - 1)
@@ -301,6 +310,26 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     deletions = 0
   }
 
+  // Optimized bulk operations for better performance
+  def bulkInsert(newPoints: Array[Point]): Unit = {
+    if (newPoints.length > rebalanceThreshold / 2) {
+      // For large bulk inserts, rebuild the entire tree
+      pointsBuffer ++= newPoints
+      rebalance()
+    } else {
+      // For smaller bulk inserts, insert individually
+      pointsBuffer ++= newPoints
+      insertions += newPoints.length
+      newPoints.foreach { point =>
+        root = insertRec(root, point, 0)
+      }
+      if (insertions >= rebalanceThreshold) {
+        rebalance()
+      }
+    }
+  }
+
+  // k-nearest neighbors with optimized heap-based approach
   def kNearestNeighbors(queryPoint: Embedding, k: Int): Array[(Point, Float)] = {
     if (root.isEmpty) return Array.empty
     if (k <= 0) return Array.empty
@@ -348,9 +377,20 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
 
   def points: Array[Point] = pointsBuffer.toArray
 
+  // Getters for serialization
   def insertionCount: Int = insertions
 
   def deletionCount: Int = deletions
+
+  // Memory-efficient tree statistics
+  def treeDepth: Int = {
+    def depthRec(node: Option[KDNode]): Int = node match {
+      case None => 0
+      case Some(n) => 1 + math.max(depthRec(n.left), depthRec(n.right))
+    }
+
+    depthRec(root)
+  }
 
 }
 

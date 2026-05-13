@@ -12,11 +12,21 @@ object StatsProtocol {
 
   case class ReportTotalEndTime(endTime: Instant) extends StatsRequest
 
-  case class ReportDelaunayComputationTime(startTime: Instant, endTime: Instant, numPoints: Long, numDimensions: Int)
-      extends StatsRequest
+  case class ReportDelaunayComputationTime(
+                                            startTime: Instant,
+                                            endTime: Instant,
+                                            numPoints: Long,
+                                            numDimensions: Int,
+                                            cpuTimeMs: Long
+                                          ) extends StatsRequest
 
-  case class ReportPartitioningTime(startTime: Instant, endTime: Instant, numPoints: Long, cpuTimeMs: Long)
-    extends StatsRequest
+  case class ReportPartitioningTime(
+                                     startTime: Instant,
+                                     endTime: Instant,
+                                     numPoints: Long,
+                                     cpuTimeMs: Long,
+                                     sentNetworkPoints: Long
+                                   ) extends StatsRequest
 
   case class ReportEpsilonExtensionTime(
       clustererId: Int,
@@ -25,7 +35,8 @@ object StatsProtocol {
       cpuTimeMs: Long,
       numPointsSend: Int,
       numPointsReceived: Int,
-      numIterations: Int
+      numIterations: Int,
+      numPointsInCell: Int
   ) extends StatsRequest
 
   case class ReportEpsilonExtensionGlobalTime(startTime: Instant, endTime: Instant) extends StatsRequest
@@ -42,14 +53,20 @@ object StatsProtocol {
       clusterPair: (Int, Int),
       startTime: Instant,
       endTime: Instant,
-      cpuTimeMs: Long
+      cpuTimeMs: Long,
+      sentNetworkEdges: Long
   ) extends StatsRequest
 
   case class ReportGlobalMergingTime(startTime: Instant, endTime: Instant, numLocalMerges: Int, cpuTimeMs: Long)
     extends StatsRequest
 
-  case class ReportLabelingTime(clustererId: Int, startTime: Instant, endTime: Instant, cpuTimeMs: Long)
-    extends StatsRequest
+  case class ReportLabelingTime(
+                                 clustererId: Int,
+                                 startTime: Instant,
+                                 endTime: Instant,
+                                 cpuTimeMs: Long,
+                                 sentNetworkPoints: Long
+                               ) extends StatsRequest
 
   case class ReportSystemLoad() extends StatsRequest
 

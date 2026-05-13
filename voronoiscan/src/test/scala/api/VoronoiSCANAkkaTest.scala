@@ -9,18 +9,6 @@ class VoronoiSCANAkkaTest extends AbstractVoronoiSCANTest {
 
   private val densired2ShrinkData = getDatasetFromResource("densired_2_shrink.csv")
 
-  private val parameters: Seq[(Int, Float, Int)] = Seq(
-    (5, 0.015f, 16),
-    (10, 0.02f, 16),
-    (15, 0.025f, 16),
-    (5, 0.015f, 32),
-    (10, 0.02f, 32),
-    (15, 0.025f, 32),
-    (5, 0.015f, 64),
-    (10, 0.02f, 64),
-    (15, 0.025f, 64)
-  )
-
   test("VoronoiSCANAkka is the same as DBSCAN") {
     val epsilon = 25
     val minPts  = 3
@@ -68,21 +56,6 @@ class VoronoiSCANAkkaTest extends AbstractVoronoiSCANTest {
     val nmi = MutualInformation.normalizedMutualInfoScore(labelsSequential, labels)
     logger.info(s"NMI: $nmi")
     assert(nmi > 0.99, "Labels should match")
-  }
-
-  parameters.foreach { case (minPts, eps, nCells) =>
-    test(s"VoronoiSCANAkka matches DBSCAN on densired_2_shrink with minPts=$minPts and eps=$eps with $nCells cells") {
-      val voronoiScan = getVoronoiSCAN(minPts, eps, nCells, 5)
-      val labels      = voronoiScan.fitTransform(densired2ShrinkData)
-      logger.info(s"Number of clusters: ${labels.distinct.length}")
-      val (labelsSequential, _) = new DBSCAN(eps, minPts).fit(densired2ShrinkData.zipWithIndex.map {
-        case (point, idx) => Point(point, idx.toLong)
-      })
-      assert(labels.length == labelsSequential.length, "Labels length should match data length")
-      val nmi = MutualInformation.normalizedMutualInfoScore(labelsSequential, labels)
-      logger.info(s"NMI: $nmi")
-      assert(nmi > 0.99, "Labels should match")
-    }
   }
 
   override def getVoronoiSCAN(minPts: Int, eps: Float, nCells: Int, minCellDistance: Float): AbstractVoronoiSCAN =

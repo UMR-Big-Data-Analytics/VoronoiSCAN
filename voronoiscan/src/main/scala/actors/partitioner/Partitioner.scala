@@ -44,9 +44,17 @@ class Partitioner private(
   // and we want to use the values of the centers for equality.
   private val centerToCellIdx = cells.map(_.center.hash()).zipWithIndex.toMap
 
+  private var num = 0L
+
+  private var sendNetworkPoints = 0L
+
+  private var totalCpuTimeMs = 0L
+
+  private val remoteClusterer = clusterers.zipWithIndex.map { case (ref, idx) =>
+    (idx, ref.path.address.hasGlobalScope)
+  }.toMap
+
   private def behavior: Behavior[PartitionerProtocol.PartitionerRequest] = {
-    var num = 0L
-    var totalCpuTimeMs = 0L
     var phaseStart: Option[Instant] = None
     Behaviors.receiveMessage {
       case PartitionerProtocol.PartitionPoints(points) =>
@@ -65,10 +73,7 @@ class Partitioner private(
         val endTime = Instant.now()
         orchestrator ! OrchestratorProtocol.PartitionerFinished(num)
         stats ! StatsProtocol.ReportPartitioningTime(
-          phaseStart.getOrElse(endTime),
-          endTime,
-          num,
-          totalCpuTimeMs
+          phaseStart.getOrElse(endTime), endTime, num, totalCpuTimeMs, sendNetworkPoints
         )
         Behaviors.stopped
       case _ => Behaviors.same
@@ -83,6 +88,9 @@ class Partitioner private(
     labels.zip(points).groupBy(_._1).foreach { case (label, points) =>
       val pointsInCell = points.map(_._2).toArray
       clusterers(label) ! ClustererProtocol.AddPoints(pointsInCell)
+      if (remoteClusterer(label)) {
+        sendNetworkPoints += pointsInCell.length
+      }
     }
     context.log.debug(s"RegularCellAssignment sent back the assigned batch")
     reader ! ReaderProtocol.RequestBatch(context.self)

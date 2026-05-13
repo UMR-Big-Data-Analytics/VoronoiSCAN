@@ -54,13 +54,13 @@ class MasterCommand extends Command {
 
   @Parameter(
     names = Array("-S", "--sampler"),
-    description = "Sampler to use for selecting cell centers; either 'grid' or 'random'. Default 'random"
+    description = "Sampler to use for selecting cell centers; either 'grid' or 'kmeans' or 'random'. Default 'kmeans"
   )
-  var sampler: String = "random"
+  var sampler: String = "kmeans"
 
   @Parameter(
     names = Array("-D", "--dbscan"),
-    description = "Implementation of the local DBSCAN to use; either 'standard', 'grid' or 'grid-actor'. Default 'grid'"
+    description = "Implementation of the local DBSCAN to use; either 'standard', 'grid' (auto), 'grid-seq', 'grid-par' or 'grid-actor'. Default 'grid'"
   )
   var dbscanImpl: String = "grid"
 

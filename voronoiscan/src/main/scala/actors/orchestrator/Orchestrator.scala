@@ -4,12 +4,13 @@ import actors.clusterer.EpsilonExtensionManager
 import actors.merging.GlobalMerger
 import actors.partitioner.Partitioner
 import actors.reader.Reader
-import actors.sampler.{GridSampler, RandomSampler, Sampler}
+import actors.sampler.{GridSampler, KMeansSampler, RandomSampler, Sampler}
 import actors.stats.Stats
-import akka.actor.typed.{ActorRef, Behavior, ChildFailed, Terminated}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.{ActorRef, Behavior, ChildFailed, Terminated}
 import configuration.{InputConfiguration, SystemConfiguration}
 import data._
+import delaunay.DelaunayGraphBuilder.buildDelaunayGraph
 import dto.{ClusterMapDto, VoronoiCellCollectionDto}
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap
 import nodedistribution.{KaHIPNodeDistributor, SingleNodeDistributor}
@@ -40,6 +41,8 @@ private class Orchestrator(
     master: ActorRef[MasterProtocol.MasterRequest],
     writer: ActorRef[WriterProtocol.WriterRequest]
 ) {
+
+  master.path.address.hasGlobalScope
 
   private val state = ClusterState(master, writer)
 
@@ -109,13 +112,17 @@ private class Orchestrator(
     val cellSampler = parameters.sampler match {
       case "grid" => new GridSampler()
       case "random" =>
-        new RandomSampler({
-          if (parameters.seed < 0) {
-            None
-          } else {
-            Some(parameters.seed)
-          }
-        })
+        new RandomSampler(
+          {
+            if (parameters.seed < 0) {
+              None
+            } else {
+              Some(parameters.seed)
+            }
+          },
+          parameters
+        )
+      case "kmeans" => new KMeansSampler()
       case other => throw new IllegalArgumentException(s"Unknown sampler: $other")
     }
     val sampler = context.spawn(Sampler(context.self, cellSampler), Sampler.DEFAULT_NAME)
@@ -186,14 +193,11 @@ private class Orchestrator(
   ): Behavior[OrchestratorProtocol.OrchestratorRequest] = {
     val parameters = state.getParameters
     val start      = System.currentTimeMillis()
-    // val graph      = buildDelaunayGraph(points)
+    val _ = buildDelaunayGraph(points)
     val end = System.currentTimeMillis()
     context.log.info("Delaunay graph constructed with {} vertices and {} edges", graph.vertices.size, graph.edges.size)
     state.getStats ! StatsProtocol.ReportDelaunayComputationTime(
-      Instant.ofEpochMilli(start),
-      Instant.ofEpochMilli(end),
-      points.length,
-      points.head.dim
+      Instant.ofEpochMilli(start), Instant.ofEpochMilli(end), points.length, points.head.dim, cpuTimeMs = 0L
     )
     val cells = constructVoronoiCells(graph, points, parameters.epsilon)
     val globalMerger =

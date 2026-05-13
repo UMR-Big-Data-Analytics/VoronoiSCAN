@@ -2,6 +2,7 @@ package delaunay
 
 import data.DelaunayGraph
 
+/** Transformer to convert a DelaunayGraph to CSR (Compressed Sparse Row) format. */
 object GraphCSRTransformer {
 
   case class CSR(xadj: Array[Int], adjncy: Array[Int])

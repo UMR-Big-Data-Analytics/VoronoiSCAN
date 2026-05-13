@@ -64,24 +64,14 @@ case class SystemConfiguration(
     this.port = command.port
   }
 
-  private def getLicenseKey: String = {
-    sys.env.get("AKKA_LICENSE_KEY") match {
-      case Some(key) => key
-      case None => throw new RuntimeException("AKKA_LICENSE_KEY environment variable not set")
-    }
-  }
-
-  def toAkkaConfig: Config = {
-    val license = getLicenseKey
+  def toAkkaConfig: Config =
     ConfigFactory
       .parseString(
-        "" + "akka.license-key = \"" + license + "\"\n" +
-          "akka.remote.artery.canonical.hostname = \"" + this.host + "\"\n" +
+        "" + "akka.remote.artery.canonical.hostname = \"" + this.host + "\"\n" +
           "akka.remote.artery.canonical.port = " + this.port + "\n" +
           "akka.cluster.roles = [" + this.role + "]\n" +
           "akka.cluster.seed-nodes = [\"akka://" + this.actorSystemName + "@" + this.masterHost + ":" + this.masterPort + "\"]"
       )
       .withFallback(ConfigFactory.load("application"))
-  }
 
 }

@@ -7,6 +7,7 @@ import scala.collection.mutable.ArrayBuffer
 
 class KDTreeTest extends AnyFunSuite {
 
+  // Helper methods for cleaner tests
   private def createPoint(x: Float, y: Float, id: Int) = Point(Array(x, y), id)
 
   private def createPoint(x: Float, y: Float, z: Float, id: Int) = Point(Array(x, y, z), id)

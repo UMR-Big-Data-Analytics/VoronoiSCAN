@@ -19,7 +19,18 @@ object Utils {
     require(pointsWithIds.nonEmpty, "Empty points")
     require(n <= pointsWithIds.length, "n > points.length")
 
-    val random           = new Random(42)
+    val selectedPoints = mutable.Set.empty[Point]
+
+    while (selectedPoints.size < n) {
+      val pointIdx = (Random.nextDouble() * pointsWithIds.length).toInt
+      val point = pointsWithIds(pointIdx)
+      if (!selectedPoints.contains(point)) {
+        selectedPoints += point
+      }
+    }
+    val kdTree = new KDTree(selectedPoints.toArray).build()
+
+    /*val random           = new Random(42)
     val idx              = (random.nextDouble() * pointsWithIds.length).toInt
     val firstPoint       = pointsWithIds(idx)
     val kdTree           = new KDTree(Array(firstPoint)).build()
@@ -39,7 +50,7 @@ object Utils {
         kdTree.insert(point)
       }
       iterationCounter += 1
-    }
+    }*/
     (selectedPoints.toArray, kdTree)
   }
 
@@ -78,6 +89,7 @@ object Utils {
     (bestCenters, new KDTree(bestCenters).build())
   }
 
+  // Internal variant returning also achieved minimum distance
   private def farthestPointSeedsWithAchieved(
       points: Array[Point],
       n: Int,

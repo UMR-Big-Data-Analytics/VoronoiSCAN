@@ -25,6 +25,7 @@ class DBSCAN(val epsilon: Float, val minPts: Int) extends BaseDBSCAN {
     val labels    = Array.fill(points.length)(-1)
     var clusterId = 0
 
+    // Pre-compute core point status
     val isCorePoint = Array.ofDim[Boolean](points.length)
     var i = 0
     while (i < points.length) {
@@ -33,8 +34,10 @@ class DBSCAN(val epsilon: Float, val minPts: Int) extends BaseDBSCAN {
       i += 1
     }
 
+    // Build a fast id->index map for O(1) lookups
     val idToIndex = points.indices.map(i => points(i).id -> i).toMap
 
+    // Perform clustering
     i = 0
     while (i < points.length) {
       if (labels(i) == -1 && isCorePoint(i)) {

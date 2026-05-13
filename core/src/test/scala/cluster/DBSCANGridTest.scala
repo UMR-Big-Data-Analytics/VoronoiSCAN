@@ -76,6 +76,23 @@ class DBSCANGridTest extends DBSCANTest {
     grid.fit(Array.empty[Point])._1.length shouldBe 0
   }
 
+  it should "produce the same result with and without parallelism" in {
+    val points = mkTwoSeparatedClusters(dim = 2, sizePerCluster = 80, spread = 0.15f, gap = 4.0f, seed = 99)
+    val epsilon = 0.35f
+    val minPts = 5
+
+    val sequential = new DBSCANGrid(epsilon, minPts, parallelism = false)
+    val parallel = new DBSCANGrid(epsilon, minPts, parallelism = true)
+
+    val (sequentialLabels, _) = sequential.fit(points)
+    val (parallelLabels, _) = parallel.fit(points)
+
+    samePartition(sequentialLabels, parallelLabels) shouldBe true
+    sequential.getNumClusters should equal(parallel.getNumClusters)
+    asIdSet(sequential.getCorePoints) should equal(asIdSet(parallel.getCorePoints))
+    asIdSet(sequential.getBorderPoints) should equal(asIdSet(parallel.getBorderPoints))
+  }
+
   datasetNames.foreach { ds =>
     it should s"match standard DBSCAN on dataset $ds" in {
       val points  = loadDataset(ds)

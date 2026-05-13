@@ -1,7 +1,7 @@
 package actors.merging
 
-import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.{ActorRef, Behavior}
 import dto.LocalDBSCANResultDto
 import dto.localdbscanresult.{LocalDBSCANResultDtoProto => PBLocalDBSCANResultDto}
 import protocol._
@@ -50,7 +50,7 @@ class EpsilonMerger private (
   def behavior: Behavior[EpsilonMergeProtocol.EpsilonMergeRequest] =
     Behaviors.receiveMessage {
       case EpsilonMergeProtocol.PushDBSCANResultChunk(chunk, chunkIdx, totalChunks, cellIdx) =>
-        val assembly = assemblies.getOrElseUpdate(
+        val _ = assemblies.getOrElseUpdate(
           cellIdx,
           EpsilonMerger.ChunkAssembly(totalChunks, scala.collection.mutable.Map.empty, 0)
         )
@@ -96,12 +96,23 @@ class EpsilonMerger private (
           context.log.debug(s"Merging results $result1 and $result2")
           val localClusteringMerge = PairwiseMerger.merge(result1, result2)
           context.log.debug(localClusteringMerge.toString)
+          val sentNetworkEdges = if (globalMergeActor.path.address.hasGlobalScope) {
+            localClusteringMerge.merges.size
+          } else {
+            0L
+          }
           globalMergeActor ! GlobalMergeProtocol.SendPairwiseMergeResult(localClusteringMerge)
           stateActor ! OrchestratorProtocol.EpsilonMergeCompleted()
           val end = Instant.now()
           val endCpu = CpuTime.nowNanos
           val cpuTimeMs = CpuTime.toMillis(endCpu - startCpu)
-          statsActor ! StatsProtocol.ReportEpsilonMergingTime((result1.cellIdx, result2.cellIdx), start, end, cpuTimeMs)
+          statsActor ! StatsProtocol.ReportEpsilonMergingTime(
+            (result1.cellIdx, result2.cellIdx),
+            start,
+            end,
+            cpuTimeMs,
+            sentNetworkEdges
+          )
           return true
         case _ => throw new IllegalStateException("LocalClusteringResults not present. This should not happen")
       }

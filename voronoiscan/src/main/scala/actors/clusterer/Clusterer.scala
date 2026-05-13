@@ -1,6 +1,7 @@
 package actors.clusterer
 
 import actors.clusterer.EpsilonExtensionManager.EpsilonExtensionManagerRequest
+import actors.dbscan.DBSCANGridAkka
 import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import cluster.{DBSCAN, DBSCANGrid}
@@ -15,7 +16,7 @@ import protocol.StatsProtocol.StatsRequest
 import protocol._
 import serialization.LocalDBSCANResultDtoConv
 import utils.CpuTime
-import utils.Distances.{euclideanDistance, euclideanDistanceSquared}
+import utils.Distances.euclideanDistanceSquared
 
 import java.time.Instant
 import scala.collection.mutable
@@ -24,6 +25,15 @@ import scala.util.control.Breaks.{break, breakable}
 object Clusterer {
 
   final val DEFAULT_NAME: String = "Clusterer"
+
+  private def initializeCellGeometryIfMissing(cell: VoronoiCell): Unit = {
+    if (cell.hasNeighbors) {
+      if (!cell.hasExtendedVoronoiCell)
+        cell.extend(cell.epsilon)
+      if (!cell.hasShrunkVoronoiCell)
+        cell.shrink(cell.epsilon)
+    }
+  }
 
   def apply(
       cell: VoronoiCell,
@@ -35,7 +45,20 @@ object Clusterer {
       minPts: Int,
       dbscanImpl: String
   ): Behavior[ClustererRequest] = {
-    require(cell.extendedVoronoiCell != null, "Extended Voronoi Cell must not be null")
+    initializeCellGeometryIfMissing(cell)
+    for (neighbor <- cell.getNeighbors)
+      initializeCellGeometryIfMissing(neighbor)
+
+    if (cell.hasNeighbors) {
+      require(
+        cell.hasExtendedVoronoiCell,
+        s"Extended Voronoi cell could not be initialized for cell ${cell.idx}"
+      )
+      require(
+        cell.hasShrunkVoronoiCell,
+        s"Shrunk Voronoi cell could not be initialized for cell ${cell.idx}"
+      )
+    }
     Behaviors.setup { context =>
       new Clusterer(context, cell, orchestrator, epsilonExtensionManager, stats, writer, epsilon, minPts,
         dbscanImpl).behavior
@@ -65,6 +88,8 @@ class Clusterer private (
   private var epsilonExtensionLastActivity: Option[Instant] = None
 
   private var epsilonExtensionPhaseStart: Option[Instant] = None
+
+  private var sentNetworkPoints = 0L
 
   private def measureEpsilonCpu[T](block: => T): T = {
     val startCpu = CpuTime.nowNanos
@@ -129,13 +154,13 @@ class Clusterer private (
       // Clustering phase
       case ClustererProtocol.ExecuteDBSCAN() =>
         val epsilonStartTime = epsilonExtensionPhaseStart.getOrElse(epsilonExtensionState.getStartTime)
-        val epsilonEndTime = epsilonExtensionLastActivity.getOrElse(Instant.now())
+        val epsilonEndTime = Instant.now()
+        val points = epsilonExtensionState.getPoints
+        val numPoints = points.length
         stats ! StatsProtocol.ReportEpsilonExtensionTime(
           cell.idx, epsilonStartTime, epsilonEndTime, epsilonExtensionCpuTimeMs, epsilonExtensionState.getNumPointsSend,
-          epsilonExtensionState.getNumPointsReceived, epsilonExtensionState.getNumIterations
+          epsilonExtensionState.getNumPointsReceived, epsilonExtensionState.getNumIterations, numPoints
         )
-        val points    = epsilonExtensionState.getPoints
-        val numPoints = points.length
         context.log.debug(
           "Executing DBSCAN for cell {} ({}) with {} points",
           cell.idx,
@@ -170,6 +195,9 @@ class Clusterer private (
           val end   = math.min(start + chunkSize, bytes.length)
           val chunk = bytes.slice(start, end)
           actorRef ! EpsilonMergeProtocol.PushDBSCANResultChunk(chunk, chunkIdx, totalChunks, cell.idx)
+          if (actorRef.path.address.hasGlobalScope) {
+            sentNetworkPoints += end - start
+          }
         }
         if (totalChunks == 0) {
           // If no chunks were sent, send an empty chunk to indicate completion
@@ -184,9 +212,8 @@ class Clusterer private (
         val clusterMap = clusterMapDto.toClusterMap
         context.log.debug("Cell {}: had {} clusters", cell.idx, dbscanState.numClusters)
         val (ids, labels) = dbscanState.getLabels(clusterMap, epsilonExtensionState.originalPoints)
-        // Chunking logic for LabeledPoints - send to Writer instead of Master
         val maxChunkSize = 256 * 1024 / 12 - 4096 // ~21k elements per chunk (8 bytes for Long + 4 bytes for Int) - 2000 bytes for overhead
-        val totalChunks  = (ids.length + maxChunkSize - 1) / maxChunkSize
+        val totalChunks = (ids.length + maxChunkSize - 1) / maxChunkSize
         for (chunkIdx <- 0 until totalChunks) {
           val start       = chunkIdx * maxChunkSize
           val end         = math.min(start + maxChunkSize, ids.length)
@@ -195,17 +222,13 @@ class Clusterer private (
           writer ! WriterProtocol.LabeledPointsChunk(idsChunk, labelsChunk, chunkIdx, totalChunks)
         }
         if (totalChunks == 0) {
-          // If no chunks were sent, send an empty chunk to indicate completion
           writer ! WriterProtocol.LabeledPointsChunk(Array.emptyLongArray, Array.emptyIntArray, 0, 1)
         }
         val end = System.currentTimeMillis()
         val endCpu = CpuTime.nowNanos
         val cpuTimeMs = CpuTime.toMillis(endCpu - startCpu)
         stats ! StatsProtocol.ReportLabelingTime(
-          cell.idx,
-          Instant.ofEpochMilli(start),
-          Instant.ofEpochMilli(end),
-          cpuTimeMs
+          cell.idx, Instant.ofEpochMilli(start), Instant.ofEpochMilli(end), cpuTimeMs, sentNetworkPoints
         )
         context.log.debug("Sent {} labeled points in {} chunks", ids.length, totalChunks)
         Behaviors.same
@@ -214,6 +237,9 @@ class Clusterer private (
   private def handleDistributedPoints(): Unit =
     epsilonExtensionState.nextBatch match {
       case Some((_, points, ref)) =>
+        if (ref.path.address.hasGlobalScope) {
+          sentNetworkPoints += points.length
+        }
         ref ! ClustererProtocol.DistributePoints(points, cell.idx, context.self)
       case None =>
         epsilonExtensionManager ! EpsilonExtensionManager.IterationDone(epsilonExtensionState.hasPointsToDistribute)
@@ -222,6 +248,8 @@ class Clusterer private (
 }
 
 private class EpsilonExtensionState(cell: VoronoiCell) {
+
+  private val isIsolatedCell = !cell.hasNeighbors
 
   private val distributePointsQueue: mutable.Queue[(Int, Array[Point], ActorRef[ClustererRequest])] =
     mutable.Queue.empty
@@ -263,6 +291,11 @@ private class EpsilonExtensionState(cell: VoronoiCell) {
       startTime = Instant.now()
     }
     points ++= newPoints
+    if (isIsolatedCell) {
+      for (point <- newPoints)
+        originalPoints.add(point.id)
+      return
+    }
     for (point <- newPoints) {
       originalPoints.add(point.id)
       breakable {
@@ -375,13 +408,36 @@ private class DBSCANState(
     val minPts: Int
 ) {
 
+  private val parallelGridMinPoints = 10000
+
+  private val parallelGridBucketSize = 256
+
+  private def shouldUseParallelGrid(numPoints: Int): Boolean =
+    Runtime.getRuntime.availableProcessors() > 1 && numPoints >= parallelGridMinPoints
+
   var clusteringResult: LocalDBSCANResult = _
 
   var numClusters: Int = _
 
-  private def getDbscanImpl(dbscanImpl: String) = {
+  private def getDbscanImpl(dbscanImpl: String, numPoints: Int) = {
     dbscanImpl match {
-      case "grid" => new DBSCANGrid(epsilon, minPts)
+      case "grid-actor" => new DBSCANGridAkka(epsilon, minPts, Some(context))
+      case "grid" =>
+        new DBSCANGrid(
+          epsilon,
+          minPts,
+          parallelism = shouldUseParallelGrid(numPoints),
+          parallelBucketSize = parallelGridBucketSize
+        )
+      case "grid-seq" =>
+        new DBSCANGrid(epsilon, minPts, parallelism = false)
+      case "grid-par" =>
+        new DBSCANGrid(
+          epsilon,
+          minPts,
+          parallelism = true,
+          parallelBucketSize = parallelGridBucketSize
+        )
       case "standard" => new DBSCAN(epsilon, minPts)
       case other => throw new IllegalArgumentException(s"Unknown DBSCAN implementation: $other")
     }
@@ -403,7 +459,7 @@ private class DBSCANState(
       numClusters = 1
       return
     }
-    val dbscan = getDbscanImpl(dbscanImpl)
+    val dbscan = getDbscanImpl(dbscanImpl, points.length)
     val (labelsArr, _) = dbscan.fit(points)
     val labelMap = new Long2IntOpenHashMap(points.length)
     for (i <- points.indices)
@@ -418,7 +474,8 @@ private class DBSCANState(
       s"Other cell index ($otherCellIdx) must not be the same as current cell index (${cell.idx})"
     )
     // Filter points that are in the shared border between the two cells
-    val isVeryClose = euclideanDistance(cell.center, cell.getNeighbor(otherCellIdx).center) <= 2 * epsilon
+    val isVeryClose =
+      euclideanDistanceSquared(cell.center, cell.getNeighbor(otherCellIdx).center) <= 4 * epsilon * epsilon // equal to euclideanDistance <= 2 * epsilon
 
     val thisCellCenter       = cell.center
     val otherMovedCellCenter = cell.shrunkVoronoiCell.getNeighborCenter(otherCellIdx)
@@ -447,7 +504,7 @@ private class DBSCANState(
   ): (Array[Long], Array[Int]) = {
     val ids = originalPoints.toLongArray
     val labels = new Array[Int](ids.length)
-    val primitive = clusteringResult.labels // Use primitive map for performance
+    val primitive = clusteringResult.labels
     for (i <- ids.indices) {
       val localLabel = primitive.get(ids(i))
       labels(i) = clusterMap.getOrElse((cell.idx, localLabel), -1)

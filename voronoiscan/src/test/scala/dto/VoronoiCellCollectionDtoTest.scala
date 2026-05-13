@@ -99,12 +99,14 @@ class VoronoiCellCollectionDtoTest extends AnyFunSuite with Matchers {
     val subset        = Set(1, 2)
 
     val dto = VoronoiCellCollectionDto(originalCells, subset)
+    val reconstructedCells = VoronoiCellCollectionDto.toVoronoiCells(dto)
 
-    // Test DTO creation properties instead of full reconstruction due to shrink method limitation
     dto.cellsDtos.length should equal(2)
     dto.subset should equal(subset)
-    dto.cellsDtos.map(_.idx).toSet should equal(Set(1, 2))
-    dto.cellsDtos.foreach(_.neighbors.size should equal(0))
+    reconstructedCells.map(_.idx).toSet should equal(Set(1, 2))
+    reconstructedCells.foreach(_.hasNeighbors should equal(false))
+    reconstructedCells.foreach(_.hasExtendedVoronoiCell should equal(false))
+    reconstructedCells.foreach(_.hasShrunkVoronoiCell should equal(false))
   }
 
   test("VoronoiCellCollectionDto should preserve cell properties") {

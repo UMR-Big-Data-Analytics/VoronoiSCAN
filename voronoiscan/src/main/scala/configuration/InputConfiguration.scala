@@ -9,7 +9,7 @@ object InputConfiguration extends AbstractGenericSingleton[InputConfiguration]()
   def empty: InputConfiguration =
     InputConfiguration(
       epsilon = 0.0f, minPts = 0, inputPath = "", numCells = 0, minCellDistanceFactor = 0.0f, batchSize = 0,
-      labelOutput = "ignored", metricsPath = "", sampler = "random", dbscanImpl = "grid", seed = 42
+      labelOutput = "ignored", metricsPath = "", sampler = "kmeans", dbscanImpl = "grid", seed = 42
     )
 
 }

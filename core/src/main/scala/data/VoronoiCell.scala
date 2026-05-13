@@ -35,6 +35,10 @@ class VoronoiCell(val idx: Int, val center: Embedding, neighbors: Set[VoronoiCel
 
   def hasNeighbors: Boolean = _neighborsMap.nonEmpty
 
+  def hasExtendedVoronoiCell: Boolean = _extendedVoronoiCell.nonEmpty
+
+  def hasShrunkVoronoiCell: Boolean = _shrunkVoronoiCell.nonEmpty
+
   def getNeighbors: mutable.Set[VoronoiCell] = _neighborsSet
 
   def getNeighbor(idx: Int): VoronoiCell =

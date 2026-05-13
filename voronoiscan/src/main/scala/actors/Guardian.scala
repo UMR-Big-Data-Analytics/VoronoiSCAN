@@ -1,9 +1,9 @@
 package actors
 
 import actors.guardian.{CSVPointSink, IgnoredPointSink, MemoryClusteredPointSink}
-import akka.actor.typed.{ActorRef, Behavior, ChildFailed}
 import akka.actor.typed.receptionist.{Receptionist, ServiceKey}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, TimerScheduler}
+import akka.actor.typed.{ActorRef, Behavior, ChildFailed}
 import configuration.{ExecutionRole, InputConfiguration, SystemConfiguration}
 import protocol.{GuardianProtocol, MasterProtocol, WorkerProtocol}
 
