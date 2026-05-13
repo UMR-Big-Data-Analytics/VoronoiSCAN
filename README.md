@@ -2,6 +2,10 @@
 
 A distributed, reactive and exact DBSCAN implementation using Voronoi tessellations.
 
+## Supplementary Material
+
+The supplementary material can be viewed in [here](./supplementary_material.pdf).
+
 ## Installing
 
 VoronoiSCAN requires Scala 2.13 and Java 21 or higher. Further we require [qhull](http://qhull.org) to compute a
