@@ -1,6 +1,6 @@
 package actors.merging
 
-import components.union_find.{LockFreeUnionFind, StaticUnionFind, UnionFind}
+import components.union_find.StaticUnionFind
 import data.LocalClusteringMerge
 import dto.LocalDBSCANResultDto
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap
@@ -11,27 +11,9 @@ import scala.collection.parallel.CollectionConverters._
 
 object PairwiseMerger {
 
-  private val parallelEdgeThreshold = 20000
-
-  private val parallelBucketSize = 4096
-
-  sealed trait MergeMode
-
-  private case object Auto extends MergeMode
-
-  private case object Sequential extends MergeMode
-
-  private case object Parallel extends MergeMode
-
-  def merge(left: LocalDBSCANResultDto, right: LocalDBSCANResultDto): LocalClusteringMerge =
-    merge(left, right, Auto)
-
   def merge(
              left: LocalDBSCANResultDto,
-             right: LocalDBSCANResultDto,
-             mode: MergeMode,
-             bucketSize: Int = parallelBucketSize,
-             edgeThreshold: Int = parallelEdgeThreshold
+             right: LocalDBSCANResultDto
            ): LocalClusteringMerge = {
     require(
       left.corePoints.length == left.borderPoints.length,
@@ -117,34 +99,12 @@ object PairwiseMerger {
       }
     }
 
-    val shouldRunParallel = mode match {
-      case Parallel => Runtime.getRuntime.availableProcessors() > 1
-      case Sequential => false
-      case Auto => Runtime.getRuntime.availableProcessors() > 1 && mergeEdges.length >= edgeThreshold
-    }
-
-    val uf: UnionFind[Int] =
-      if (shouldRunParallel) {
-        val parallelUf = new LockFreeUnionFind[Int](allVertices)
-        for (batch <- mergeEdges.grouped(bucketSize)) {
-          batch.toVector.par.foreach { case (u, v) =>
-            val ru = parallelUf.find(u)
-            val rv = parallelUf.find(v)
-            if (ru != rv) {
-              parallelUf.union(ru, rv)
-            }
-          }
-        }
-        parallelUf
-      } else {
-        val sequentialUf = new StaticUnionFind[Int](allVertices)
-        mergeEdges.foreach { case (u, v) =>
-          if (sequentialUf.find(u) != sequentialUf.find(v)) {
-            sequentialUf.union(u, v)
-          }
-        }
-        sequentialUf
+    val uf = new StaticUnionFind[Int](allVertices)
+    mergeEdges.foreach { case (u, v) =>
+      if (uf.find(u) != uf.find(v)) {
+        uf.union(u, v)
       }
+    }
 
     val rootToComponentIdx = mutable.Map.empty[Int, Int]
     var componentIdx       = 0

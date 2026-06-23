@@ -3,7 +3,6 @@ package cluster
 import components.union_find.StaticUnionFind
 import data.Point
 import data.Point.Embedding
-import io.{CSVWriter, OpenCSVReader}
 import spatial.index._
 import utils.Distances.euclideanDistanceSquared
 
@@ -46,7 +45,6 @@ class DBSCANGrid(
       println("Warning: Empty points collection provided to DBSCANGrid.fit()")
       return (Array.empty[Int], Array.empty[Point])
     }
-    // Clear maps for consecutive runs
     corePointsMap.clear()
     borderPointsMap.clear()
 
@@ -58,36 +56,28 @@ class DBSCANGrid(
     val clusters               = clusterCore(grid, coreCells, coreFlags)
     clusterBorder(grid, coreFlags, clusters)
 
-    val labels = points.map(p => clusters.getOrElse(p.id.toInt, -1))
+    val labels = points.map(p => clusters.getOrElse(p.id, -1))
     (labels, points)
   }
 
-  /** Identifies border points and assigns them to a cluster. A border point is a non-core point that is within the
-   * epsilon radius of a core point.
-   */
   @inline private def clusterBorder(
       grid: Grid,
-      coreFlags: mutable.Map[Int, Boolean],
-      clusters: mutable.Map[Int, Int]
+      coreFlags: mutable.Map[Long, Boolean],
+      clusters: mutable.Map[Long, Int]
   ): Unit = {
     if (parallelism) {
       parallelOps.clusterBorder(grid, coreFlags, clusters, borderPointsMap)
       return
     }
-    // Iterate over ALL cells, not just those with less than minPts.
-    // A non-core point (potential border point) can exist in any cell.
     for (cell <- grid.cellsMap.values.filter(_.numPoints < minPts)) {
-      // Find all points in the cell that were NOT marked as core points.
-      val potentialBorderPoints = cell.points.filter(p => !coreFlags.getOrElse(p.id.toInt, false))
+      val potentialBorderPoints = cell.points.filter(p => !coreFlags.getOrElse(p.id, false))
       val cellsToSearch         = Vector(cell) ++ grid.queryEpsNeighborCells(cell.id)
-      val coreClusterLookup = clusters.toMap
 
       for (point <- potentialBorderPoints) {
-        val clusterIds = collectNeighborClusterIds(point, cellsToSearch, coreFlags, coreClusterLookup)
+        val clusterIds = collectNeighborClusterIds(point, cellsToSearch, coreFlags, clusters)
         if (clusterIds.nonEmpty) {
-          // Keep a deterministic primary label for the legacy single-label output.
           val primaryClusterId = clusterIds.min
-          clusters(point.id.toInt) = primaryClusterId
+          clusters(point.id) = primaryClusterId
           borderPointsMap.getOrElseUpdate(primaryClusterId, mutable.Set.empty) += point
         }
       }
@@ -97,40 +87,37 @@ class DBSCANGrid(
   @inline private[cluster] def collectNeighborClusterIds(
                                                           point: Point,
                                                           cellsToSearch: Vector[GridCell],
-                                                          coreFlags: mutable.Map[Int, Boolean],
-                                                          coreClusterLookup: collection.Map[Int, Int]
+                                                          coreFlags: mutable.Map[Long, Boolean],
+                                                          coreClusterLookup: collection.Map[Long, Int]
                                                         ): Set[Int] = {
     cellsToSearch.iterator
       .flatMap(_.points.iterator)
-      .filter(coreNeighbor => coreFlags.getOrElse(coreNeighbor.id.toInt, false))
+      .filter(coreNeighbor => coreFlags.getOrElse(coreNeighbor.id, false))
       .filter(coreNeighbor => euclideanDistanceSquared(point.vector, coreNeighbor.vector) <= epsilonSquared)
-      .flatMap(coreNeighbor => coreClusterLookup.get(coreNeighbor.id.toInt))
+      .flatMap(coreNeighbor => coreClusterLookup.get(coreNeighbor.id))
       .toSet
   }
 
   @inline private def makeCells(points: Array[Point]): Grid = {
     val dim = points.head.vector.length
-    new Grid(points, epsilon, dim)
+    new Grid(points, epsilon, dim, parallelism)
   }
 
-  @inline private def markCore(grid: Grid): (Array[GridCell], mutable.Map[Int, Boolean]) = {
+  @inline private def markCore(grid: Grid): (Array[GridCell], mutable.Map[Long, Boolean]) = {
     if (parallelism) {
       return parallelOps.markCore(grid)
     }
 
-    val coreFlags = mutable.Map.empty[Int, Boolean]
+    val coreFlags = mutable.Map.empty[Long, Boolean]
     val coreCells = mutable.Set[GridCell]()
 
     for (cell <- grid.cellsMap.values) {
-      // Optimization: If a cell has >= minPts, assume all points in it are core.
-      // This is a primary source of difference with classic DBSCAN.
       if (cell.numPoints >= minPts) {
         cell.setIsCore(true)
         coreCells += cell
         for (point <- cell.points)
-          coreFlags(point.id.toInt) = true
+          coreFlags(point.id) = true
       } else {
-        // For less dense cells, check each point individually.
         val neighborCells = grid.queryEpsNeighborCells(cell.id)
         for (point <- cell.points) {
           breakable {
@@ -138,8 +125,7 @@ class DBSCANGrid(
             for (neighbor <- neighborCells) {
               count += neighbor.rangeCount(point.vector, grid.epsilon)
               if (count >= minPts) {
-                coreFlags(point.id.toInt) = true
-                // The cell containing a core point is considered a core cell for clustering.
+                coreFlags(point.id) = true
                 if (!cell.isCore) {
                   cell.setIsCore(true)
                   coreCells += cell
@@ -158,8 +144,8 @@ class DBSCANGrid(
   @inline private def clusterCore(
       grid: Grid,
       coreCells: Array[GridCell],
-      coreFlags: mutable.Map[Int, Boolean]
-  ): mutable.Map[Int, Int] = {
+      coreFlags: mutable.Map[Long, Boolean]
+                                 ): mutable.Map[Long, Int] = {
     if (parallelism) {
       val (parallelClusters, parallelNumClusters) = parallelOps.clusterCore(grid, coreCells, coreFlags, corePointsMap)
       numClusters = parallelNumClusters
@@ -178,7 +164,7 @@ class DBSCANGrid(
       }
     }
 
-    val clusters        = mutable.Map.empty[Int, Int]
+    val clusters = mutable.Map.empty[Long, Int]
     var clusterID       = 0
     val rootToClusterID = mutable.Map.empty[GridCell, Int]
 
@@ -189,8 +175,8 @@ class DBSCANGrid(
         rootToClusterID(root) = clusterID
       }
       val currentClusterId = rootToClusterID(root)
-      for (point <- cell.points.filter(p => coreFlags.getOrElse(p.id.toInt, false))) {
-        clusters(point.id.toInt) = currentClusterId
+      for (point <- cell.points.filter(p => coreFlags.getOrElse(p.id, false))) {
+        clusters(point.id) = currentClusterId
         corePointsMap.getOrElseUpdate(currentClusterId, mutable.Set.empty) += point
       }
     }
@@ -231,10 +217,8 @@ case class GridCell(
 
   val center: Embedding = gridCoords.map(c => (c * length + 0.5 * length).toFloat).toArray // Center of the cell in integer coordinates
 
-  // Lazy initialization of the tree is important, otherwise the tree is incomplete
   var isCore: Boolean = false
 
-  // Use thread-safe lazy initialization with synchronized block
   @volatile private var _tree: QuadTree = _
 
   private val treeLock = new Object()
@@ -265,7 +249,6 @@ case class GridCell(
   }
 
   private def buildTree() = {
-    // implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
     val indexTree = new QuadTree(points).build()
     indexTree
   }
@@ -276,19 +259,21 @@ case class GridCell(
   def rangeCount(anchorPoint: Embedding, range: Float): Int =
     tree.rangeCount(anchorPoint, range)
 
+  def rangeCountUpTo(anchorPoint: Embedding, range: Float, limit: Int): Int =
+    tree.rangeCountUpTo(anchorPoint, range, limit)
+
   override def getId: Int = id
 
   override def getTree: QuadTree = tree
 
 }
 
-class Grid(var points: Array[Point], val epsilon: Float, val dim: Int) {
+class Grid(var points: Array[Point], val epsilon: Float, val dim: Int, val parallel: Boolean) {
 
   val cellsMap: mutable.Map[Vector[Int], GridCell] = mutable.Map.empty
 
   val cellIdToKey: mutable.Map[Long, Vector[Int]] = mutable.Map.empty
 
-  // Ensure dependencies are initialized before building the center tree
   private val cellSize: Float = epsilon / math.sqrt(dim).toFloat
 
   // See https://github.com/wangyiqiu/dbscan-python/blob/42e1e719c2aa363c8991a0ada8e52a32b8702b15/include/dbscan/grid.h#L169
@@ -304,28 +289,37 @@ class Grid(var points: Array[Point], val epsilon: Float, val dim: Int) {
 
   var centerTree: KDTree = initializeGrid()
 
-  private val neighborCache = mutable.Map.empty[Int, Vector[GridCell]]
+  private val neighborCache = if (parallel) {
+    new java.util.concurrent.ConcurrentHashMap[Int, Vector[GridCell]]()
+  } else {
+    new java.util.HashMap[Int, Vector[GridCell]]()
+  };
 
   @inline def queryEpsNeighborCells(cellIdx: Int): Vector[GridCell] = {
-    neighborCache.synchronized {
-      neighborCache.getOrElseUpdate(
-        cellIdx, {
-          val cellCoords = cellIdToKey(cellIdx)
-          val cell = cellsMap(cellCoords)
+    neighborCache.computeIfAbsent(
+      cellIdx,
+      { idx =>
+        val cellCoords = cellIdToKey(idx)
+        val cell = cellsMap(cellCoords)
 
-          val queryResult = centerTree.rangeQuery(cell.center, searchRadius)
-          if (queryResult.isEmpty) {
-            Vector.empty
-          } else {
-            val neighbors = queryResult.filter(_.id != cell.id)
-            neighbors.toVector.map { neighbor =>
-              val neighborCellCoords = cellIdToKey(neighbor.id)
-              cellsMap(neighborCellCoords)
+        val queryResult = centerTree.rangeQuery(cell.center, searchRadius)
+        if (queryResult.isEmpty) {
+          Vector.empty
+        } else {
+          val cellId = cell.id
+          val builder = Vector.newBuilder[GridCell]
+          var i = 0
+          while (i < queryResult.length) {
+            val neighbor = queryResult(i)
+            if (neighbor.id != cellId) {
+              builder += cellsMap(cellIdToKey(neighbor.id))
             }
+            i += 1
           }
+          builder.result()
         }
-      )
-    }
+      }
+    )
   }
 
   @inline def initializeGrid(): KDTree = {
@@ -356,16 +350,13 @@ class Grid(var points: Array[Point], val epsilon: Float, val dim: Int) {
     }.toVector
 
   def merge(other: Grid): Grid = {
-    // Find the maximum existing cell ID
     val maxCellId = if (cellIdToKey.isEmpty) -1 else cellIdToKey.keys.max.toInt
     var nextCellId = maxCellId
 
     for ((coords, cell) <- other.cellsMap) {
       if (this.cellsMap.contains(coords)) {
-        // Merge points into existing cell
         this.cellsMap(coords).points ++= cell.points
       } else {
-        // Add new cell with a new ID
         nextCellId += 1
         val newCell = GridCell(
           nextCellId, cell.gridCoords, cell.length, cell.searchRadius, cell.points
@@ -382,24 +373,8 @@ class Grid(var points: Array[Point], val epsilon: Float, val dim: Int) {
   }
 
   def rebuildTree(): Unit = {
-    // Rebuild the center tree with all cells. Avoid forcing every cell's QuadTree build here;
-    // they remain lazily initialized upon first range query / count to reduce upfront cost.
     val cellCenters = cellsMap.values.map(cell => Point(cell.center, cell.id)).toArray
     this.centerTree = new KDTree(cellCenters).build()
-  }
-
-}
-
-object DBSCANGrid {
-
-  def main(args: Array[String]): Unit = {
-    val data = new OpenCSVReader("data/densired_4_eps0.015_minPts5.csv").read
-    val epsilon = 0.015f
-    val minPts = 5
-    val pointsWithIds = data.zipWithIndex.map { case (point, id) => Point(point, id.toLong) }
-    val dbscan = new DBSCANGrid(epsilon, minPts)
-    val (labels, points) = dbscan.fit(pointsWithIds)
-    new CSVWriter("data/densired_4_eps0.015_minPts5_results.csv").write(points, labels)
   }
 
 }

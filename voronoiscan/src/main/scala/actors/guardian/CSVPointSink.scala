@@ -106,9 +106,12 @@ class CSVPointSink[T](filePath: String) extends ClusteredPointSink {
 
       // Helper function to write a byte at a specific position with buffer bounds checking
       def writeByte(position: Long, value: Byte): Unit = {
-        val bufIdx = (position / maxBufferSize).toInt
+        val bufIdxLong = position / maxBufferSize
+        if (bufIdxLong >= buffers.length) {
+          throw new IndexOutOfBoundsException(s"Buffer index $bufIdxLong out of range for ${buffers.length} mapped buffers")
+        }
         val offset = (position % maxBufferSize).toInt
-        buffers(bufIdx).put(offset, value)
+        buffers(bufIdxLong.toInt).put(offset, value)
       }
 
       if (currentLabel == 0) {

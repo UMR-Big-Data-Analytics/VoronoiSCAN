@@ -1,7 +1,6 @@
 package assignment
 
-import data.Point
-import data.VoronoiCell
+import data.{Point, VoronoiCell}
 import spatial.index.KDTree
 
 trait AssignmentStrategy {

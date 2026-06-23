@@ -1,8 +1,7 @@
 package actors.sampler
 
 import components.union_find.StaticUnionFind
-import data.DelaunayGraph
-import data.Point
+import data.{DelaunayGraph, Point}
 import delaunay.DelaunayGraphBuilder
 import spatial.index.KDTree
 import utils.Distances.euclideanDistance
@@ -35,9 +34,9 @@ object CellContractor {
     }
 
     val components: collection.Set[collection.Set[Int]] = uf.getComponents
-    val nGroups                                         = components.size
-    val sortedRoots: Array[collection.Set[Int]]         = components.toArray.sortBy(_.min)
-    val rootToNew: Map[collection.Set[Int], Int]        = sortedRoots.zipWithIndex.toMap
+    val nGroups = components.size
+    val sortedRoots: Array[collection.Set[Int]] = components.toArray.sortBy(_.min)
+    val rootToNew: Map[collection.Set[Int], Int] = sortedRoots.zipWithIndex.toMap
     val oldToNew: Array[Int] = Array.tabulate(n) { i =>
       val component = components.find(_.contains(i)).get
       rootToNew(component)
@@ -63,7 +62,7 @@ object CellContractor {
       if (nu != nv) Some((math.min(nu, nv), math.max(nu, nv))) else None
     }
 
-    val newGraph  = DelaunayGraphBuilder.buildDelaunayGraph(newCenters)
+    val newGraph = DelaunayGraphBuilder.buildDelaunayGraph(newCenters)
     val newKdTree = new KDTree(newCenters).build()
 
     log.info(

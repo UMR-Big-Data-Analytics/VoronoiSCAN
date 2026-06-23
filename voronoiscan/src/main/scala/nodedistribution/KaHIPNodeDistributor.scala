@@ -22,7 +22,7 @@ object KaHIPNodeDistributor extends NodeDistributor {
         adjncy, // Adjacency list
         adjcwgt,
         numNodes, // Number of partitions
-        0.03,     // Maximum allowed imbalance
+        0.00001, // Maximum allowed imbalance
         false,    // suppress_output
         42        // random seed);
       )

@@ -1,12 +1,12 @@
 package actors.clusterer
 
-import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.{ActorRef, Behavior}
 import data.VoronoiCell
 import protocol.ClustererProtocol.ClustererRequest
 import protocol.Message.CborMessage
-import protocol.{ClustererProtocol, OrchestratorProtocol}
 import protocol.OrchestratorProtocol.OrchestratorRequest
+import protocol.{ClustererProtocol, OrchestratorProtocol}
 
 import scala.collection.mutable
 
@@ -45,14 +45,12 @@ class EpsilonExtensionManager(orchestrator: ActorRef[OrchestratorRequest], cells
     Behaviors.setup[EpsilonExtensionManagerRequest] { context =>
       Behaviors.receiveMessage {
         case RegisterEpsilonExtensionActor(ref, cellIdx) =>
-          // Register the epsilon extension actor for the corresponding cell index
           clustererActors(cellIdx) = ref
           if (clustererActors.size == cells.length) {
             exchangeClustererActors()
           }
           Behaviors.same
         case PartitionedPoints() =>
-          // Start the first iteration
           for (epsilonExtension <- clustererActors.values)
             epsilonExtension ! ClustererProtocol.StartIteration()
           Behaviors.same
@@ -77,7 +75,6 @@ class EpsilonExtensionManager(orchestrator: ActorRef[OrchestratorRequest], cells
     }
 
   private def exchangeClustererActors(): Unit = {
-    // Check validity of the actor references
     require(
       cells.length == clustererActors.size,
       s"Number of cells (${cells.length}) must match number of epsilon extension actors (${clustererActors.size})"
@@ -87,7 +84,6 @@ class EpsilonExtensionManager(orchestrator: ActorRef[OrchestratorRequest], cells
       require(refId == cellIdx, s"Actor reference ID ($refId) must match cell index ($cellIdx)")
     }
 
-    // Map each cell index to a map of its neighbor indices and their corresponding epsilon extension actor references
     val refs = cells.map { cell =>
       cell.idx -> cell.getNeighbors.flatMap { neighbor =>
         clustererActors.get(neighbor.idx).map((neighbor.idx, _))

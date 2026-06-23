@@ -54,9 +54,9 @@ class MasterCommand extends Command {
 
   @Parameter(
     names = Array("-S", "--sampler"),
-    description = "Sampler to use for selecting cell centers; either 'grid' or 'kmeans' or 'random'. Default 'kmeans"
+    description = "Sampler to use for selecting cell centers; either 'grid' or 'random'. Default 'random'"
   )
-  var sampler: String = "kmeans"
+  var sampler: String = "random"
 
   @Parameter(
     names = Array("-D", "--dbscan"),

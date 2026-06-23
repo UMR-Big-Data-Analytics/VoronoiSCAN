@@ -31,13 +31,24 @@ object ClustererProtocol {
   @SerialVersionUID(202507220006L)
   case class ExecuteDBSCAN() extends ClustererRequest with CborMessage
 
+  // Internal-only messages for async DBSCAN execution in Clusterer (never sent over network).
+  final case class DBSCANExecutionCompleted(startTimeMs: Long, numPoints: Int, cpuTimeMs: Long) extends ClustererRequest
+
+  final case class DBSCANExecutionFailed(startTimeMs: Long, numPoints: Int, cause: Throwable) extends ClustererRequest
+
+  // Delivered (via a message adapter) when the actor-based DBSCAN implementation finishes.
+  final case class DBSCANActorCompleted(result: actors.dbscan.DBSCANGridAkka.Result) extends ClustererRequest
+
   case class SendClusteringResultToEpsilonMerger(
-      actorRef: ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest],
-      otherCellIdx: Int
-  ) extends ClustererRequest
-      with CborMessage
+                                                  actorRef: ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest],
+                                                  otherCellIdx: Int
+                                                ) extends ClustererRequest
+    with CborMessage
 
   @SerialVersionUID(202507220007L)
   case class LabelPoints(clusterMapDto: ClusterMapDto) extends ClustererRequest with ProtobufMessage
+
+  @SerialVersionUID(202507220008L)
+  case class LabeledChunkAck() extends ClustererRequest with CborMessage
 
 }

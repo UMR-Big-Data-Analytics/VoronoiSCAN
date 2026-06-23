@@ -40,8 +40,11 @@ class Partitioner private(
     orchestrator: ActorRef[OrchestratorRequest]
 ) {
 
-  // Hash the centers to ints because map will use the array objects' reference equality
-  // and we want to use the values of the centers for equality.
+  require(
+    !clusterers.contains(null),
+    s"Partitioner received null clusterer refs for cell indices: ${clusterers.iterator.zipWithIndex.collect { case (null, idx) => idx }.mkString(", ")}"
+  )
+
   private val centerToCellIdx = cells.map(_.center.hash()).zipWithIndex.toMap
 
   private var num = 0L
@@ -73,7 +76,11 @@ class Partitioner private(
         val endTime = Instant.now()
         orchestrator ! OrchestratorProtocol.PartitionerFinished(num)
         stats ! StatsProtocol.ReportPartitioningTime(
-          phaseStart.getOrElse(endTime), endTime, num, totalCpuTimeMs, sendNetworkPoints
+          phaseStart.getOrElse(endTime),
+          endTime,
+          num,
+          totalCpuTimeMs,
+          sendNetworkPoints
         )
         Behaviors.stopped
       case _ => Behaviors.same

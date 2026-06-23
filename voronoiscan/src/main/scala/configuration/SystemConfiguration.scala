@@ -41,7 +41,7 @@ case class SystemConfiguration(
     var masterHost: String = SystemConfiguration.getDefaultHost,
     var masterPort: Int = SystemConfiguration.DEFAULT_MASTER_PORT,
     var actorSystemName: String = "voronoiscan",
-    var numWorkers: Int = 1
+    var numWorkers: Int = 1,
 ) {
 
   def update(masterCommand: MasterCommand): Unit = {

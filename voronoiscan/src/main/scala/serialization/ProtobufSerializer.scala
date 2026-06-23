@@ -103,12 +103,15 @@ class ProtobufSerializer(system: ExtendedActorSystem) extends SerializerWithStri
       case PartitionerProtocol.PartitionPoints(points) =>
         PBPartitionPointsProto(points = points.map(PointConv.toProto)).toByteArray
 
-      case WriterProtocol.LabeledPointsChunk(ids, labels, chunkIdx, totalChunks) =>
+      case WriterProtocol.LabeledPointsChunk(sourceCellIdx, ids, labels, chunkIdx, totalChunks, replyTo) =>
+        val replyToPath = resolver.toSerializationFormat(replyTo)
         PBWriterLabeledPointsChunkProto(
           ids = ids,
           labels = labels,
           chunkIdx = chunkIdx,
-          totalChunks = totalChunks
+          totalChunks = totalChunks,
+          sourceCellIdx = sourceCellIdx,
+          replyTo = replyToPath
         ).toByteArray
 
       case EpsilonMergeProtocol.PushDBSCANResult(resultDto) =>
@@ -168,7 +171,8 @@ class ProtobufSerializer(system: ExtendedActorSystem) extends SerializerWithStri
 
       case WriterLabeledChunk =>
         val pb = PBWriterLabeledPointsChunkProto.parseFrom(raw)
-        WriterProtocol.LabeledPointsChunk(pb.ids, pb.labels, pb.chunkIdx, pb.totalChunks)
+        val replyTo: ActorRef[ClustererProtocol.ClustererRequest] = resolver.resolveActorRef(pb.replyTo)
+        WriterProtocol.LabeledPointsChunk(pb.sourceCellIdx, pb.ids, pb.labels, pb.chunkIdx, pb.totalChunks, replyTo)
 
       case EpsilonPush =>
         val pb = PBPushDBSCANResultDtoProto.parseFrom(raw)
@@ -291,6 +295,7 @@ object ClusterMapConv {
     }
     ClusterMapDto(cellIndices, localClusterIds, labels)
   }
+
 
 }
 

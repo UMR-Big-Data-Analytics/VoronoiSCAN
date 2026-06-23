@@ -9,11 +9,7 @@ class GridSampler extends CellSampler {
 
   import GridSampler._
 
-  override def getCenters(
-                           filePath: String,
-                           numSamples: Int,
-                           minDistance: Float
-                         ): (Array[Point], KDTree, DelaunayGraph) = {
+  override def getCenters(filePath: String, numSamples: Int, minDistance: Float): (Array[Point], KDTree, DelaunayGraph) = {
     val boundingBox = computeBoundingBox(filePath)
     boundingBox.zipWithIndex.foreach { case ((min, max), dim) =>
       log.info(s"Dimension $dim: Min = $min, Max = $max, Span = ${max - min}")
@@ -28,10 +24,10 @@ class GridSampler extends CellSampler {
     (centers, kdTree, graph)
   }
 
+
 }
 
 object GridSampler {
-
   private val log = org.slf4j.LoggerFactory.getLogger(this.getClass)
 
   /** Generates an n-dimensional grid of points within a specific bounding box.
@@ -40,13 +36,18 @@ object GridSampler {
    * number of points $N$, we proceed as follows:
    *
    * Let $L_i$ be the span (length) of dimension $i$. Let $k_i$ be the number of points along dimension $i$.
-   * \begin{enumerate} \item **Uniform Spacing Constraint**: $$ L_i \approx k_i \cdot s \implies k_i = \frac{L_i}{s} $$
-   * \item **Total Points Constraint**: $$ N = \prod_{i=1}^{n} k_i $$ \item **Substitution**: Substitute $k_i$ into the
-   * product formula: $$ N = \prod_{i=1}^{n} \left( \frac{L_i}{s} \right) = \frac{\prod_{i=0}^n L_i}{s^n} =
-   * \frac{\text{Volume}}{s^n} $$ \item **Solving for Spacing ($s$)**: $$ s^n = \frac{\text{Volume}}{N} \implies s =
-   * \left( \frac{\text{Volume}}{N} \right)^{\frac{1}{n}} $$ \item **Solving for Points per Dimension ($k_i$)**:
-   * Substituting $s$ back into the first equation: $$ k_i = L_i \cdot \frac{1}{s} = L_i \cdot \left(
-   * \frac{N}{\text{Volume}} \right)^{\frac{1}{n}} $$ \end{enumerate}
+   * \begin{enumerate}
+   * \item **Uniform Spacing Constraint**: $$ L_i \approx k_i \cdot s \implies k_i = \frac{L_i}{s} $$
+   * \item **Total Points
+   * Constraint**: $$ N = \prod_{i=1}^{n} k_i $$
+   * \item **Substitution**: Substitute $k_i$ into the product formula:
+   * $$ N = \prod_{i=1}^{n} \left( \frac{L_i}{s} \right) = \frac{\prod_{i=0}^n L_i}{s^n} = \frac{\text{Volume}}{s^n} $$
+   * \item **Solving for Spacing ($s$)**: $$ s^n = \frac{\text{Volume}}{N} \implies s = \left( \frac{\text{Volume}}{N}
+   * \right)^{\frac{1}{n}} $$
+   * \item **Solving for Points per Dimension ($k_i$)**: Substituting $s$ back into the
+   * first equation: $$ k_i = L_i \cdot \frac{1}{s} = L_i \cdot \left( \frac{N}{\text{Volume}}
+   * \right)^{\frac{1}{n}} $$
+   * \end{enumerate}
    *
    * @param bounds
    * A sequence of (min, max) tuples representing the bounding box.
@@ -174,11 +175,12 @@ object GridSampler {
       source.close()
   }
 
-  /** Build an undirected graph whose vertices are the grid cell centers and whose edges connect adjacent grid cells
-   * (differing by 1 in exactly one dimension).
+  /**
+   * Build an undirected graph whose vertices are the grid cell centers and whose
+   * edges connect adjacent grid cells (differing by 1 in exactly one dimension).
    *
-   * The graph uses the existing [[data.DelaunayGraph]] structure, with vertex indices matching the order of the
-   * Cartesian product produced by [[createGrid]].
+   * The graph uses the existing [[data.DelaunayGraph]] structure, with vertex indices
+   * matching the order of the Cartesian product produced by [[createGrid]].
    */
   def buildAdjacencyGraph(bounds: Seq[(Float, Float)], targetN: Int): DelaunayGraph = {
     val centers: Seq[Seq[Float]] = createGrid(bounds, targetN)

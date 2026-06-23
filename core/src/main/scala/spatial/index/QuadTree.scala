@@ -7,45 +7,22 @@ import utils.Distances.euclideanDistanceSquared
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-/** Internal representation of a node in the Hyper-Quadtree.
- *
- * @param minBounds
- * The minimum coordinates of the bounding box for this node.
- * @param maxBounds
- * The maximum coordinates of the bounding box for this node.
- * @param numChildren
- * The number of children this node can have (2 to the N).
- */
 class QuadTreeNode(
     val minBounds: Embedding,
     val maxBounds: Embedding,
     numChildren: Int
 ) {
 
-  // An array to hold the 2^N children nodes.
   val children: Array[QuadTreeNode] = Array.fill(numChildren)(null)
 
-  // Use ArrayBuffer for better performance during insertions
   val elements: ArrayBuffer[Point] = ArrayBuffer.empty[Point]
 
   var isLeaf: Boolean = true
 
-  var size: Int = 0 // Number of points in this node and its children.
+  var size: Int = 0
 
 }
 
-/** A Hyper-Quadtree data structure for efficient N-dimensional spatial queries. This is a true generalization of a
- * Quadtree to N dimensions.
- *
- * @param points
- * The collection of (point, original_index) tuples to build the tree from.
- * @param leafCapacity
- * The maximum number of elements in a leaf node before it splits.
- * @param maxDepth
- * The maximum depth of the tree.
- * @param minPointsForSplit
- * The minimum number of points required to split a node.
- */
 class QuadTree(
     val points: ArrayBuffer[Point],
     leafCapacity: Int = 32,
@@ -70,7 +47,6 @@ class QuadTree(
     this
   }
 
-  /** Main entry point for building the tree - optimized for performance. */
   private def buildTree(): QuadTreeNode = {
     if (points.isEmpty) {
       return null
@@ -98,7 +74,6 @@ class QuadTree(
     rootNode
   }
 
-  /** Recursive helper method to build the tree. */
   def build(node: QuadTreeNode, nodePoints: ArrayBuffer[Point], depth: Int): Unit = {
     node.size = nodePoints.size
 
@@ -115,13 +90,11 @@ class QuadTree(
 
     val childPoints = Array.fill(numChildren)(new ArrayBuffer[Point]())
 
-    // Partition points into the 2^N children.
     for (p <- nodePoints) {
-      val childIndex = getChildIndex(p.vector, center) // use vector-based getChildIndex
+      val childIndex = getChildIndex(p.vector, center)
       childPoints(childIndex) += p
     }
 
-    // Create and recursively build child nodes.
     for (i <- 0 until numChildren) {
       if (childPoints(i).nonEmpty) {
         val (childMin, childMax) = calculateChildBounds(i, node.minBounds, node.maxBounds, center)
@@ -131,9 +104,6 @@ class QuadTree(
     }
   }
 
-  /** Determines which child a point belongs to based on the center of a node. The index is calculated as a bitmask. For
-   * each dimension, the bit is 1 if the point's coordinate is greater than the center, and 0 otherwise.
-   */
   private def getChildIndex(pointVector: Embedding, center: Embedding): Int = {
     var index = 0
     for (d <- 0 until dimensions) {
@@ -144,7 +114,6 @@ class QuadTree(
     index
   }
 
-  /** Calculates the bounding box for a child node given its index. */
   private def calculateChildBounds(
       index: Int,
       parentMin: Embedding,
@@ -165,7 +134,6 @@ class QuadTree(
     (minB, maxB)
   }
 
-  /** Finds all points within a given search radius of a query point. */
   override def rangeQuery(queryPoint: Point, radius: Float): Array[Point] = {
     val (results: ArrayBuffer[Point], radiusSq: Double, searchBoxMin: Array[Float], searchBoxMax: Array[Float]) =
       computeSearchBoxes(queryPoint, radius)
@@ -190,9 +158,59 @@ class QuadTree(
     (results, radiusSq, searchBoxMin, searchBoxMax)
   }
 
-  /** Finds all points within a given search radius of a query point vector. Overload to accept Embedding directly. */
   def rangeQuery(queryVector: Embedding, radius: Float): Array[Point] =
     rangeQuery(Point(queryVector, -1L), radius)
+
+  def rangeCountUpTo(queryVector: Embedding, radius: Float, limit: Int): Int = {
+    if (limit <= 0 || root == null) {
+      return 0
+    }
+    val radiusSq = radius.toDouble * radius.toDouble
+    val searchBoxMin = Array.ofDim[Float](dimensions)
+    val searchBoxMax = Array.ofDim[Float](dimensions)
+    var i = 0
+    while (i < dimensions) {
+      searchBoxMin(i) = queryVector(i) - radius
+      searchBoxMax(i) = queryVector(i) + radius
+      i += 1
+    }
+    countRecursive(root, queryVector, radiusSq, searchBoxMin, searchBoxMax, limit)
+  }
+
+  private def countRecursive(
+                              node: QuadTreeNode,
+                              queryVector: Embedding,
+                              radiusSq: Double,
+                              searchBoxMin: Embedding,
+                              searchBoxMax: Embedding,
+                              limit: Int
+                            ): Int = {
+    if (node == null || !boxIntersects(node.minBounds, node.maxBounds, searchBoxMin, searchBoxMax)) {
+      return 0
+    }
+
+    var found = 0
+    if (node.isLeaf) {
+      val elementsSize = node.elements.length
+      var i = 0
+      while (i < elementsSize && found < limit) {
+        if (euclideanDistanceSquared(queryVector, node.elements(i).vector) <= radiusSq) {
+          found += 1
+        }
+        i += 1
+      }
+    } else {
+      var i = 0
+      while (i < numChildren && found < limit) {
+        val child = node.children(i)
+        if (child != null) {
+          found += countRecursive(child, queryVector, radiusSq, searchBoxMin, searchBoxMax, limit - found)
+        }
+        i += 1
+      }
+    }
+    found
+  }
 
   def hasNeighborInRange(queryVector: Embedding, radius: Float): Boolean = {
     val (results: ArrayBuffer[Point], radiusSq: Double, searchBoxMin: Array[Float], searchBoxMax: Array[Float]) =
@@ -223,14 +241,12 @@ class QuadTree(
     }
 
     if (node.isLeaf) {
-      // Optimized iteration through elements
       var i            = 0
       val elementsSize = node.elements.length
       while (i < elementsSize) {
         val p = node.elements(i)
         if (euclideanDistanceSquared(queryPoint.vector, p.vector) <= radiusSq) {
           results += p
-          // Early termination check
           if (earlyTerminate) {
             return true
           }
@@ -238,7 +254,6 @@ class QuadTree(
         i += 1
       }
     } else {
-      // Optimized child traversal - avoid filter/sort when possible
       var i = 0
       while (i < numChildren) {
         val child = node.children(i)
@@ -254,7 +269,6 @@ class QuadTree(
     false
   }
 
-  /** Finds the k-nearest neighbors to a query point. */
   override def kNearestNeighbors(queryPoint: Embedding, k: Int): Array[(Point, Float)] = {
     val pq = mutable.PriorityQueue.empty[(Double, Point)](Ordering.by[(Double, Point), Double](_._1))
     knnRecursive(root, queryPoint, k, pq)
@@ -288,7 +302,6 @@ class QuadTree(
         }
       }
     } else {
-      // Visit child nodes ordered by their distance to the query point.
       val sortedChildren =
         node.children.filter(_ != null).sortBy(c => boxDistSq(queryPoint, c.minBounds, c.maxBounds))
       for (child <- sortedChildren)
@@ -297,7 +310,6 @@ class QuadTree(
   }
 
   private def boxIntersects(min1: Embedding, max1: Embedding, min2: Embedding, max2: Embedding): Boolean = {
-    // Optimized box intersection check using while loop
     var i = 0
     while (i < dimensions) {
       if (min1(i) > max2(i) || max1(i) < min2(i)) {

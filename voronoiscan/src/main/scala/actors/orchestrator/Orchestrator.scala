@@ -4,10 +4,10 @@ import actors.clusterer.EpsilonExtensionManager
 import actors.merging.GlobalMerger
 import actors.partitioner.Partitioner
 import actors.reader.Reader
-import actors.sampler.{GridSampler, KMeansSampler, RandomSampler, Sampler}
+import actors.sampler.{GridSampler, RandomSampler, Sampler}
 import actors.stats.Stats
+import akka.actor.typed._
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior, ChildFailed, Terminated}
 import configuration.{InputConfiguration, SystemConfiguration}
 import data._
 import delaunay.DelaunayGraphBuilder.buildDelaunayGraph
@@ -105,8 +105,12 @@ private class Orchestrator(
       parameters: InputConfiguration,
       workers: Seq[ActorRef[WorkerProtocol.WorkerRequest]]
   ): Behavior[OrchestratorProtocol.OrchestratorRequest] = {
-    val stats  = context.spawn(Stats(parameters), actors.stats.Stats.DEFAULT_NAME)
-    val reader = context.spawn(Reader(parameters.batchSize), Reader.DEFAULT_NAME)
+    val stats = context.spawn(Stats(parameters), actors.stats.Stats.DEFAULT_NAME)
+    val reader = context.spawn(
+      Reader(parameters.batchSize),
+      Reader.DEFAULT_NAME,
+      DispatcherSelector.fromConfig("akka.worker-pool-dispatcher")
+    )
     context.watch(stats)
     context.watch(reader)
     val cellSampler = parameters.sampler match {
@@ -122,10 +126,13 @@ private class Orchestrator(
           },
           parameters
         )
-      case "kmeans" => new KMeansSampler()
       case other => throw new IllegalArgumentException(s"Unknown sampler: $other")
     }
-    val sampler = context.spawn(Sampler(context.self, cellSampler), Sampler.DEFAULT_NAME)
+    val sampler = context.spawn(
+      Sampler(context.self, cellSampler),
+      Sampler.DEFAULT_NAME,
+      DispatcherSelector.fromConfig("akka.worker-pool-dispatcher")
+    )
     context.watch(sampler)
     state.setReader(reader)
     state.setParameters(parameters)
@@ -201,7 +208,11 @@ private class Orchestrator(
     )
     val cells = constructVoronoiCells(graph, points, parameters.epsilon)
     val globalMerger =
-      context.spawn(GlobalMerger(context.self, graph.edges.size, state.getStats), GlobalMerger.DEFAULT_NAME)
+      context.spawn(
+        GlobalMerger(context.self, graph.edges.size, state.getStats),
+        GlobalMerger.DEFAULT_NAME,
+        DispatcherSelector.fromConfig("akka.worker-pool-dispatcher")
+      )
     context.watch(globalMerger)
     val epsilonMergeManager =
       context.spawn(EpsilonExtensionManager(context.self, cells), EpsilonExtensionManager.DEFAULT_NAME)
@@ -228,10 +239,10 @@ private class Orchestrator(
                             parameters: InputConfiguration,
                             globalMerger: ActorRef[GlobalMergeProtocol.GlobalMergeRequest]
   ): Unit = {
-    val cellMapping         = constructWorkerCellMapping(graph, cells)
+    val cellMapping = constructWorkerCellMapping(graph, cells)
     val epsilonMergeMapping = constructWorkerEpsilonMergeMapping(graph, cellMapping)
     cellMapping.foreach { case (idx, cellsToSpawn) =>
-      val edges    = epsilonMergeMapping(idx).toArray
+      val edges = epsilonMergeMapping(idx).toArray
       val cellsDto = VoronoiCellCollectionDto(cells, cellsToSpawn.map(_.idx).toSet)
       state.getWorkers(idx % state.getWorkers.length) ! WorkerProtocol.SpawnWorker(
         context.self, cellsDto, edges, parameters.epsilon, parameters.minPts, parameters.dbscanImpl, globalMerger,
@@ -266,15 +277,15 @@ private class Orchestrator(
   private def constructWorkerEpsilonMergeMapping(
                                                   graph: DelaunayGraph,
                                                   cellWorkerMapping: Map[Int, Array[VoronoiCell]]
-  ): mutable.Map[Int, mutable.Set[(Int, Int)]] = {
-    val numCells       = graph.vertices.size
+                                                ): mutable.Map[Int, mutable.Set[(Int, Int)]] = {
+    val numCells = graph.vertices.size
     val reverseMapping = new Array[Int](numCells)
     cellWorkerMapping.foreach { case (workerIdx, cells) =>
       cells.foreach(cell => reverseMapping(cell.idx) = workerIdx)
     }
 
     val numWorkers = cellWorkerMapping.size
-    val mapping    = mutable.Map.empty[Int, mutable.Set[(Int, Int)]]
+    val mapping = mutable.Map.empty[Int, mutable.Set[(Int, Int)]]
     for (i <- 0 until numWorkers)
       mapping(i) = mutable.Set.empty[(Int, Int)]
 
@@ -290,7 +301,7 @@ private class Orchestrator(
 
     // Distribute outer edges using load balancing
     outerEdges.foreach { case (left, right) =>
-      val leftWorker  = reverseMapping(left)
+      val leftWorker = reverseMapping(left)
       val rightWorker = reverseMapping(right)
       val workerIdx = if (mapping(leftWorker).size <= mapping(rightWorker).size) {
         leftWorker
@@ -304,8 +315,8 @@ private class Orchestrator(
   }
 
   private def handleSpawnedWorker(
-      clusterer: Array[ActorRef[ClustererProtocol.ClustererRequest]],
-      epsilonMerger: Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]]
+                                   clusterer: Array[ActorRef[ClustererProtocol.ClustererRequest]],
+                                   epsilonMerger: Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]]
   ): Behavior[OrchestratorProtocol.OrchestratorRequest] = {
     state.addClusterers(clusterer)
     state.addEpsilonMergers(epsilonMerger)
@@ -324,7 +335,8 @@ private class Orchestrator(
       val ref = context.spawn(
         Partitioner(state.getReader, state.getCells, state.getKdTree, state.getClusterers, state.getStats,
           context.self),
-        s"${Partitioner.DEFAULT_NAME}-$i"
+        s"${Partitioner.DEFAULT_NAME}-$i",
+        DispatcherSelector.fromConfig("akka.worker-pool-dispatcher")
       )
       context.watch(ref)
       ref
@@ -410,7 +422,7 @@ private class Orchestrator(
     private val clusterCountMap = new Int2IntOpenHashMap()
 
     private val epsilonMergers
-        : mutable.Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]] = mutable.Map.empty
+    : mutable.Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]] = mutable.Map.empty
 
     private val workers: mutable.Set[ActorRef[WorkerProtocol.WorkerRequest]] = mutable.Set.empty
 
@@ -496,25 +508,39 @@ private class Orchestrator(
     def getEpsilonMergers: collection.Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]] =
       epsilonMergers.size match {
         case size if size > 0 => epsilonMergers
-        case _                => throw new IllegalStateException("Epsilon mergers not initialized")
+        case _ => throw new IllegalStateException("Epsilon mergers not initialized")
       }
 
     def addEpsilonMergers(
-        epsilonMergers: collection.Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]]
-    ): Unit =
+                           epsilonMergers: collection.Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]]
+                         ): Unit =
       this.epsilonMergers ++= epsilonMergers
 
     def initializeClusterers(numCells: Int): Unit =
       clusterers = Array.fill(numCells)(null)
 
+    private def missingClustererIndices: IndexedSeq[Int] =
+      clusterers.iterator.zipWithIndex.collect { case (null, idx) => idx }.toIndexedSeq
+
+    private def allClusterersRegistered: Boolean =
+      clusterers.nonEmpty && missingClustererIndices.isEmpty
+
     def getClusterers: Array[ActorRef[ClustererProtocol.ClustererRequest]] =
       clusterers.length match {
-        case size if size > 0 => clusterers
-        case _                => throw new IllegalStateException("Clusterers not initialized")
+        case 0 => throw new IllegalStateException("Clusterers not initialized")
+        case _ =>
+          val missing = missingClustererIndices
+          if (missing.nonEmpty) {
+            throw new IllegalStateException(
+              s"Clusterers not fully initialized. Missing refs for cell indices: ${missing.mkString(", ")}"
+            )
+          }
+          clusterers
       }
 
     def addClusterers(clusterers: Array[ActorRef[ClustererProtocol.ClustererRequest]]): Unit = {
       for (clusterer <- clusterers) {
+        require(clusterer != null, "Received null clusterer ref from worker")
         val cellIdx = clusterer.path.name.split("-").last.toInt
         this.clusterers(cellIdx) = clusterer
       }
@@ -600,7 +626,8 @@ private class Orchestrator(
       graph match {
         case Some(g) =>
           g.vertices.length == clusterers.length &&
-          epsilonMergers.size == g.edges.size
+            allClusterersRegistered &&
+            epsilonMergers.size == g.edges.size
         case None => false
       }
     }

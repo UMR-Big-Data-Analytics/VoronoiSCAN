@@ -4,16 +4,22 @@ import actors.sampler.SampleHelper.{getPoints, getRandomSamples}
 import configuration.{InputConfiguration, SystemConfiguration}
 import data.{DelaunayGraph, Point}
 import delaunay.DelaunayGraphBuilder
+import org.slf4j.{Logger, LoggerFactory}
 import spatial.index.KDTree
 import utils.Utils
 
 class RandomSampler(seed: Option[Int] = None, inputConfiguration: InputConfiguration) extends CellSampler {
+
+  private val logger: Logger = LoggerFactory.getLogger(getClass)
 
   override def getCenters(
                            filePath: String,
                            numSamples: Int,
                            minDistance: Float
                          ): (Array[Point], KDTree, DelaunayGraph) = {
+    if (seed.isDefined) {
+      logger.info(s"Using random seed: ${seed.get}")
+    }
     val lines = getRandomSamples(filePath, 500 * numSamples, seed)
     extractSamples(lines, numSamples, minDistance)
   }

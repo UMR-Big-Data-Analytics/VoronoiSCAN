@@ -12,4 +12,7 @@ message LabeledPointsChunkProto {
     (scalapb.field).collection_type = "Array"];
   int32 chunkIdx = 3;
   int32 totalChunks = 4;
+  int32 sourceCellIdx = 5;
+  // Serialized ActorRef path for ack-based flow control
+  string replyTo = 6;
 }

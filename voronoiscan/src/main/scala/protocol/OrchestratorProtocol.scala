@@ -49,10 +49,10 @@ object OrchestratorProtocol {
 
   @SerialVersionUID(202507070001L)
   final case class SpawnedWorker(
-      clusterer: Array[ActorRef[ClustererProtocol.ClustererRequest]],
-      @JsonSerialize(keyUsing = classOf[EdgeKeySerializer])
-      @JsonDeserialize(keyUsing = classOf[EdgeKeyDeserializer])
-      epsilonMerger: Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]]
+                                  clusterer: Array[ActorRef[ClustererProtocol.ClustererRequest]],
+                                  @JsonSerialize(keyUsing = classOf[EdgeKeySerializer])
+                                  @JsonDeserialize(keyUsing = classOf[EdgeKeyDeserializer])
+                                  epsilonMerger: Map[Edge[Int, Vertex[Int]], ActorRef[EpsilonMergeProtocol.EpsilonMergeRequest]]
   ) extends OrchestratorRequest
       with CborMessage
 

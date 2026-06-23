@@ -3,7 +3,7 @@ package actors
 import actors.guardian.{CSVPointSink, IgnoredPointSink, MemoryClusteredPointSink}
 import akka.actor.typed.receptionist.{Receptionist, ServiceKey}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, TimerScheduler}
-import akka.actor.typed.{ActorRef, Behavior, ChildFailed}
+import akka.actor.typed.{ActorRef, Behavior, ChildFailed, DispatcherSelector}
 import configuration.{ExecutionRole, InputConfiguration, SystemConfiguration}
 import protocol.{GuardianProtocol, MasterProtocol, WorkerProtocol}
 
@@ -73,13 +73,14 @@ private class Guardian(
       }
     }
     context.log.info(s"Waiting for ${SystemConfiguration.get.numWorkers} Workers to connect.")
-    val ref = context.spawn(Master(context.self, sink), Master.DEFAULT_NAME)
+    val ref = context.spawn(Master(context.self, sink), Master.DEFAULT_NAME,
+      DispatcherSelector.fromConfig("akka.master-pinned-dispatcher"))
     Some(ref)
   } else {
     None
   }
 
-  private val workerRef = context.spawn(Worker(context.self), Worker.DEFAULT_NAME)
+  private val workerRef = context.spawn(Worker(context.self), Worker.DEFAULT_NAME, DispatcherSelector.fromConfig("akka.worker-pool-dispatcher"))
 
   state.worker = Some(workerRef)
 
@@ -99,15 +100,11 @@ private class Guardian(
           case _ =>
             Behaviors.unhandled
         }
-      }
-      .receiveSignal { case (_, ChildFailed(ref, e)) =>
-        context.log.error(
-          "Actor {} has terminated. Probably due to some child exception. Shutting down",
-          ref.path.name,
-          e
-        )
-        context.self ! GuardianProtocol.ShutdownMessage()
-        Behaviors.same
+      }.receiveSignal {
+        case (_, ChildFailed(ref, e)) =>
+          context.log.error("Actor {} has terminated. Probably due to some child exception. Shutting down", ref.path.name, e)
+          context.self ! GuardianProtocol.ShutdownMessage()
+          Behaviors.same
       }
   }
 

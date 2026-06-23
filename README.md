@@ -79,6 +79,14 @@ On each worker node:
 java --enable-preview --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -Djava.library.path=/lib -jar voronoiscan/target/scala-2.13/voronoiscan.jar Worker -p <some_port> -mh <master_host> -mp <master_port>
 ```
 
+## Additional Remark
+
+In this implementation, we offer two parallel internal DBSCAN variants. One, as reported in the paper, is based on the
+Scala Parallel Collections library. This is the default implementation, which can also be explicitly selected by using
+the `-D grid-par` option. The other variant is based on Akka actors, which can be selected by using the `-D grid-actor`
+option (See [here](./voronoiscan/src/main/scala/configuration/MasterCommand.scala)). Because the Parallel Collections
+variant is slightly faster than the Akka variant, we recommend using the Parallel Collections variant for most cases.
+
 ## Generating the densired_x datasets
 
 To generate the densired_x datasets, you can use the provided Python script. First, ensure you have Python 3 installed

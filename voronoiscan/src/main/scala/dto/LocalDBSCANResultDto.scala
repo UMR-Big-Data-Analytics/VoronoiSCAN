@@ -9,7 +9,7 @@ case class LocalDBSCANResultDto(
     corePoints: Array[Array[Long]],
     borderPoints: Array[Array[Long]],
     labelKeys: Array[Long],
-    labelValues: Array[Int]
+    labelValues: Array[Int],
 ) {
 
   @JsonIgnore

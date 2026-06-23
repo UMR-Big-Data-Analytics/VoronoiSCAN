@@ -258,7 +258,7 @@ class Stats private (
                                    additionalData: String
                                  ): Unit = {
     val durationMs = Duration.between(startTime, endTime).toMillis
-    val timestamp  = getCurrentTimestamp
+    val timestamp = getCurrentTimestamp
     val data =
       if (additionalData.nonEmpty)
         s"$numNodes,$timestamp,$startTime,$endTime,$durationMs,$additionalData"

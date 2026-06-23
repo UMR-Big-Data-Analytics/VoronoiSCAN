@@ -7,15 +7,14 @@ import utils.Distances.euclideanDistanceSquared
 import scala.annotation.tailrec
 import scala.collection.mutable.ArrayBuffer
 
-class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceThreshold: Int = 100)
+class KDTree(initialPoints: ArrayBuffer[Point], val rebalanceThreshold: Int = 100)
   extends Serializable
     with SpatialTree[KDTree] {
 
   def this(initialPoints: Array[Point], depth: Int, rebalanceThreshold: Int) =
-    this(ArrayBuffer.from(initialPoints), depth, rebalanceThreshold)
+    this(ArrayBuffer.from(initialPoints), rebalanceThreshold)
 
-  // Added convenience constructor with default depth and rebalanceThreshold
-  def this(initialPoints: Array[Point]) = this(ArrayBuffer.from(initialPoints), 10, 100)
+  def this(initialPoints: Array[Point]) = this(ArrayBuffer.from(initialPoints), 100)
 
   require(initialPoints.nonEmpty, "Points collection must not be empty")
 
@@ -61,10 +60,8 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     if (root.isEmpty) return Array.empty
 
     val rangeSq = range.toDouble * range.toDouble
-    // Declare buffer locally to ensure thread safety
     val resultBuffer = ArrayBuffer.empty[Point]
 
-    // Use iterative approach for better performance
     val nodeStack = ArrayBuffer.empty[(KDNode, Int)]
     nodeStack.addOne((root.get, 0))
 
@@ -78,7 +75,6 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
       val splitVal = node.pointWithId.vector(axis)
       val queryVal = anchorPoint(axis)
 
-      // More efficient range checking with early bounds check
       val rangeDiff = range.toDouble
       if (queryVal - rangeDiff <= splitVal && node.left.isDefined) {
         nodeStack.addOne((node.left.get, depth + 1))
@@ -91,7 +87,6 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     resultBuffer.toArray
   }
 
-  // Efficient count-only version avoiding materializing result points
   override def rangeCount(anchorPoint: Embedding, range: Float): Int = {
     if (root.isEmpty) return 0
     val rangeSq   = range.toDouble * range.toDouble
@@ -122,9 +117,8 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
 
     val axis = depth % k
 
-    // Use intro-select for better worst-case performance
     val medianIndex = points.length / 2
-    introSelectInPlace(points, medianIndex, axis, 0, points.length - 1, depth)
+    introSelectInPlace(points, medianIndex, axis, 0, points.length - 1)
 
     val median      = points(medianIndex)
     val leftPoints  = points.slice(0, medianIndex)
@@ -139,29 +133,19 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     )
   }
 
-  // Improved selection algorithm with hybrid approach (intro-select)
-  private def introSelectInPlace(
-                                  points: Array[Point],
-                                  targetIndex: Int,
-                                  axis: Int,
-                                  low: Int,
-                                  high: Int,
-                                  depthLimit: Int
-                                ): Unit = {
+  private def introSelectInPlace(points: Array[Point], targetIndex: Int, axis: Int, low: Int, high: Int): Unit = {
 
     @tailrec
     def introSelectRec(l: Int, h: Int, target: Int, depth: Int): Unit = {
       if (l < h) {
-        // Switch to heap-select for deep recursion to guarantee O(n) performance
         if (depth <= 0) {
           heapSelectInPlace(points, l, h, target, axis)
         } else {
-          // Use median-of-three pivot selection for better partitioning
           val pivotIndex    = medianOfThree(points, l, h, axis)
           val newPivotIndex = partitionArray(points, l, h, pivotIndex, axis)
 
           if (newPivotIndex == target) {
-            // Found the target
+            // Skip
           } else if (newPivotIndex > target) {
             introSelectRec(l, newPivotIndex - 1, target, depth - 1)
           } else {
@@ -184,17 +168,14 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
   }
 
   private def heapSelectInPlace(points: Array[Point], low: Int, high: Int, target: Int, axis: Int): Unit = {
-    // Simple heap-based selection for guaranteed O(n) worst case
     val n = high - low + 1
     var i = n / 2 - 1
 
-    // Build heap
     while (i >= 0) {
       heapify(points, low, high, low + i, axis)
       i -= 1
     }
 
-    // Extract elements until we reach target
     var end = high
     while (end > low + target - low) {
       swap(points, low, end)
@@ -227,7 +208,6 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
 
   private def partitionArray(points: Array[Point], low: Int, high: Int, pivotIndex: Int, axis: Int): Int = {
     val pivotValue = points(pivotIndex).vector(axis)
-    // Move pivot to end
     swap(points, pivotIndex, high)
     var storeIndex = low
 
@@ -239,7 +219,6 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
       }
       i += 1
     }
-    // Move pivot to its final place
     swap(points, storeIndex, high)
     storeIndex
   }
@@ -310,31 +289,10 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
     deletions = 0
   }
 
-  // Optimized bulk operations for better performance
-  def bulkInsert(newPoints: Array[Point]): Unit = {
-    if (newPoints.length > rebalanceThreshold / 2) {
-      // For large bulk inserts, rebuild the entire tree
-      pointsBuffer ++= newPoints
-      rebalance()
-    } else {
-      // For smaller bulk inserts, insert individually
-      pointsBuffer ++= newPoints
-      insertions += newPoints.length
-      newPoints.foreach { point =>
-        root = insertRec(root, point, 0)
-      }
-      if (insertions >= rebalanceThreshold) {
-        rebalance()
-      }
-    }
-  }
-
-  // k-nearest neighbors with optimized heap-based approach
   def kNearestNeighbors(queryPoint: Embedding, k: Int): Array[(Point, Float)] = {
     if (root.isEmpty) return Array.empty
     if (k <= 0) return Array.empty
 
-    // Use a max-heap to maintain k nearest neighbors
     val maxHeap = scala.collection.mutable.PriorityQueue.empty[(Point, Double)](
       Ordering.by(_._2)
     )
@@ -356,12 +314,10 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
 
       val (firstChild, secondChild) = if (goLeft) (node.left, node.right) else (node.right, node.left)
 
-      // Search the closer side first
       if (firstChild.isDefined) {
         searchRec(firstChild.get, depth + 1)
       }
 
-      // Check if we need to search the other side
       val axisDist        = queryAxisValue - nodeAxisValue
       val axisDiffSq      = axisDist * axisDist
       val searchThreshold = if (maxHeap.size < k) Double.MaxValue else maxHeap.head._2
@@ -376,21 +332,6 @@ class KDTree(initialPoints: ArrayBuffer[Point], depth: Int = 10, val rebalanceTh
   }
 
   def points: Array[Point] = pointsBuffer.toArray
-
-  // Getters for serialization
-  def insertionCount: Int = insertions
-
-  def deletionCount: Int = deletions
-
-  // Memory-efficient tree statistics
-  def treeDepth: Int = {
-    def depthRec(node: Option[KDNode]): Int = node match {
-      case None => 0
-      case Some(n) => 1 + math.max(depthRec(n.left), depthRec(n.right))
-    }
-
-    depthRec(root)
-  }
 
 }
 

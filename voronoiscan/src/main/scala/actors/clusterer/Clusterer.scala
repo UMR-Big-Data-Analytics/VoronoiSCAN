@@ -2,8 +2,9 @@ package actors.clusterer
 
 import actors.clusterer.EpsilonExtensionManager.EpsilonExtensionManagerRequest
 import actors.dbscan.DBSCANGridAkka
-import akka.actor.typed.{ActorRef, Behavior}
+import akka.actor.typed.scaladsl.adapter._
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.{ActorRef, Behavior}
 import cluster.{DBSCAN, DBSCANGrid}
 import data.{LocalDBSCANResult, Point, VoronoiCell}
 import dto.LocalDBSCANResultDto
@@ -20,7 +21,9 @@ import utils.Distances.euclideanDistanceSquared
 
 import java.time.Instant
 import scala.collection.mutable
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.Breaks.{break, breakable}
+import scala.util.{Failure, Success}
 
 object Clusterer {
 
@@ -73,7 +76,7 @@ class Clusterer private (
     orchestrator: ActorRef[OrchestratorRequest],
     epsilonExtensionManager: ActorRef[EpsilonExtensionManagerRequest],
     stats: ActorRef[StatsRequest],
-    writer: ActorRef[WriterProtocol.WriterRequest], // Add writer reference
+    writer: ActorRef[WriterProtocol.WriterRequest],
     epsilon: Float,
     minPts: Int,
     dbscanImpl: String
@@ -106,6 +109,24 @@ class Clusterer private (
       epsilonExtensionPhaseStart = Some(now)
       epsilonExtensionLastActivity = Some(now)
       epsilonExtensionCpuTimeMs = 0L
+    }
+
+  private var labelChunkIds: Array[Array[Long]] = _
+  private var labelChunkLabels: Array[Array[Int]] = _
+  private var labelTotalChunks: Int = 0
+  private var labelNextChunkIdx: Int = 0
+  private var labelStartTimeMs: Long = 0L
+  private var labelStartCpuNs: Long = 0L
+
+  private def sendNextLabelChunk(): Unit =
+    if (labelNextChunkIdx < labelTotalChunks) {
+      val ids = labelChunkIds(labelNextChunkIdx)
+      val labels = labelChunkLabels(labelNextChunkIdx)
+      if (writer.path.address.hasGlobalScope)
+        sentNetworkPoints += ids.length.toLong * 12
+      writer ! WriterProtocol.LabeledPointsChunk(
+        cell.idx, ids, labels, labelNextChunkIdx, labelTotalChunks, context.self
+      )
     }
 
   epsilonExtensionManager ! EpsilonExtensionManager.RegisterEpsilonExtensionActor(context.self, cell.idx)
@@ -167,17 +188,35 @@ class Clusterer private (
           cell.center,
           numPoints
         )
-        val startTime = System.currentTimeMillis()
-        val startCpu = CpuTime.nowNanos
-        dbscanState.executeDBSCAN(points, dbscanImpl)
-        val endCpu = CpuTime.nowNanos
+        val startTimeMs = System.currentTimeMillis()
+        dbscanState.executeDBSCAN(points, dbscanImpl, startTimeMs, numPoints) match {
+          case Some(clusteringRun) =>
+            context.pipeToSelf(clusteringRun) {
+              case Success(cpuTimeMs) => ClustererProtocol.DBSCANExecutionCompleted(startTimeMs, numPoints, cpuTimeMs)
+              case Failure(exception) => ClustererProtocol.DBSCANExecutionFailed(startTimeMs, numPoints, exception)
+            }
+          case None =>
+            // Actor-based DBSCAN: a DBSCANActorCompleted message will arrive when clustering finishes.
+        }
+        Behaviors.same
+
+      case ClustererProtocol.DBSCANActorCompleted(result) =>
+        val (startTimeMs, numPoints, cpuTimeMs) = dbscanState.completeActorRun(result)
+        context.self ! ClustererProtocol.DBSCANExecutionCompleted(startTimeMs, numPoints, cpuTimeMs)
+        Behaviors.same
+
+      case ClustererProtocol.DBSCANExecutionCompleted(startTimeMs, numPoints, cpuTimeMs) =>
         val endTimeMs = System.currentTimeMillis()
-        val cpuTimeMs = CpuTime.toMillis(endCpu - startCpu)
         stats ! StatsProtocol.ReportClusteringTime(
-          cell.idx, Instant.ofEpochMilli(startTime), Instant.ofEpochMilli(endTimeMs), numPoints, cpuTimeMs
+          cell.idx, Instant.ofEpochMilli(startTimeMs), Instant.ofEpochMilli(endTimeMs), numPoints, cpuTimeMs
         )
         orchestrator ! OrchestratorProtocol.ExecutedDBSCAN(context.self, cell.idx, dbscanState.numClusters)
         Behaviors.same
+
+      case ClustererProtocol.DBSCANExecutionFailed(_, _, cause) =>
+        context.log.error(s"DBSCAN execution failed for cell ${cell.idx}", cause)
+        throw cause
+
       case ClustererProtocol.SendClusteringResultToEpsilonMerger(actorRef, otherCellIdx) =>
         val sharedBorder = dbscanState.getSharedBorder(otherCellIdx)
         require(
@@ -187,12 +226,12 @@ class Clusterer private (
         val dto = LocalDBSCANResultDto.fromLocalDBSCANResult(sharedBorder)
         // Convert DTO to protobuf and serialize to bytes
         val pbDto = LocalDBSCANResultDtoConv.toProto(dto)
-        val bytes       = pbDto.toByteArray
-        val chunkSize   = 256 * 1024 - 1000 // 256kb - 1000 bytes for overhead
+        val bytes = pbDto.toByteArray
+        val chunkSize = 256 * 1024 - 1000 // 256kb - 1000 bytes for overhead
         val totalChunks = (bytes.length + chunkSize - 1) / chunkSize
         for (chunkIdx <- 0 until totalChunks) {
           val start = chunkIdx * chunkSize
-          val end   = math.min(start + chunkSize, bytes.length)
+          val end = math.min(start + chunkSize, bytes.length)
           val chunk = bytes.slice(start, end)
           actorRef ! EpsilonMergeProtocol.PushDBSCANResultChunk(chunk, chunkIdx, totalChunks, cell.idx)
           if (actorRef.path.address.hasGlobalScope) {
@@ -200,37 +239,52 @@ class Clusterer private (
           }
         }
         if (totalChunks == 0) {
-          // If no chunks were sent, send an empty chunk to indicate completion
           actorRef ! EpsilonMergeProtocol.PushDBSCANResultChunk(Array.emptyByteArray, 0, 1, cell.idx)
         }
         Behaviors.same
 
       // Labeling phase
       case ClustererProtocol.LabelPoints(clusterMapDto) =>
-        val start      = System.currentTimeMillis()
-        val startCpu = CpuTime.nowNanos
+        labelStartTimeMs = System.currentTimeMillis()
+        labelStartCpuNs = CpuTime.nowNanos
         val clusterMap = clusterMapDto.toClusterMap
         context.log.debug("Cell {}: had {} clusters", cell.idx, dbscanState.numClusters)
         val (ids, labels) = dbscanState.getLabels(clusterMap, epsilonExtensionState.originalPoints)
-        val maxChunkSize = 256 * 1024 / 12 - 4096 // ~21k elements per chunk (8 bytes for Long + 4 bytes for Int) - 2000 bytes for overhead
-        val totalChunks = (ids.length + maxChunkSize - 1) / maxChunkSize
-        for (chunkIdx <- 0 until totalChunks) {
-          val start       = chunkIdx * maxChunkSize
-          val end         = math.min(start + maxChunkSize, ids.length)
-          val idsChunk    = ids.slice(start, end)
-          val labelsChunk = labels.slice(start, end)
-          writer ! WriterProtocol.LabeledPointsChunk(idsChunk, labelsChunk, chunkIdx, totalChunks)
+        val maxChunkSize = 128 * 1024 / 12 - 1024 // ~10k elements per chunk
+        labelTotalChunks = math.max(1, (ids.length + maxChunkSize - 1) / maxChunkSize)
+        labelNextChunkIdx = 0
+        labelChunkIds = new Array[Array[Long]](labelTotalChunks)
+        labelChunkLabels = new Array[Array[Int]](labelTotalChunks)
+        if (ids.isEmpty) {
+          labelChunkIds(0) = Array.emptyLongArray
+          labelChunkLabels(0) = Array.emptyIntArray
+        } else {
+          for (chunkIdx <- 0 until labelTotalChunks) {
+            val start = chunkIdx * maxChunkSize
+            val end = math.min(start + maxChunkSize, ids.length)
+            labelChunkIds(chunkIdx) = ids.slice(start, end)
+            labelChunkLabels(chunkIdx) = labels.slice(start, end)
+          }
         }
-        if (totalChunks == 0) {
-          writer ! WriterProtocol.LabeledPointsChunk(Array.emptyLongArray, Array.emptyIntArray, 0, 1)
+        context.log.debug("Sending {} labeled points in {} chunks (one at a time)", ids.length, labelTotalChunks)
+        sendNextLabelChunk()
+        Behaviors.same
+
+      case ClustererProtocol.LabeledChunkAck() =>
+        labelNextChunkIdx += 1
+        if (labelNextChunkIdx < labelTotalChunks) {
+          sendNextLabelChunk()
+        } else {
+          val endTimeMs = System.currentTimeMillis()
+          val cpuTimeMs = CpuTime.toMillis(CpuTime.nowNanos - labelStartCpuNs)
+          stats ! StatsProtocol.ReportLabelingTime(
+            cell.idx,
+            Instant.ofEpochMilli(labelStartTimeMs),
+            Instant.ofEpochMilli(endTimeMs),
+            cpuTimeMs,
+            sentNetworkPoints
+          )
         }
-        val end = System.currentTimeMillis()
-        val endCpu = CpuTime.nowNanos
-        val cpuTimeMs = CpuTime.toMillis(endCpu - startCpu)
-        stats ! StatsProtocol.ReportLabelingTime(
-          cell.idx, Instant.ofEpochMilli(start), Instant.ofEpochMilli(end), cpuTimeMs, sentNetworkPoints
-        )
-        context.log.debug("Sent {} labeled points in {} chunks", ids.length, totalChunks)
         Behaviors.same
     }
 
@@ -366,7 +420,6 @@ private class EpsilonExtensionState(cell: VoronoiCell) {
 
   def setupNewIteration(): Unit = {
     numIterations += 1
-    // Build distribution queue now that clusterer actors should be known
     for (neighbor <- cell.getNeighbors) {
       val neighborIdx = neighbor.idx
       val actorRef    = clustererActors.get(neighborIdx)
@@ -375,7 +428,6 @@ private class EpsilonExtensionState(cell: VoronoiCell) {
         s"Actor reference ID (${actorRef.path.name.split("-").last.toInt}) must match neighbor index ($neighborIdx)"
       )
       val pointsToDistribute = getPointsToDistribute(neighborIdx)
-      // Group points into batches and enqueue each batch
       pointsToDistribute.grouped(BATCH_SIZE).foreach { batch =>
         distributePointsQueue += ((neighborIdx, batch, actorRef))
       }
@@ -408,6 +460,9 @@ private class DBSCANState(
     val minPts: Int
 ) {
 
+  private val clusteringExecutionContext: ExecutionContext =
+    context.system.toClassic.dispatchers.lookup("akka.worker-pool-dispatcher")
+
   private val parallelGridMinPoints = 10000
 
   private val parallelGridBucketSize = 256
@@ -419,9 +474,18 @@ private class DBSCANState(
 
   var numClusters: Int = _
 
+  // Adapts the actor DBSCAN's Result message into a ClustererRequest the Clusterer can handle.
+  private val dbscanResultAdapter: ActorRef[DBSCANGridAkka.Result] =
+    context.messageAdapter(result => ClustererProtocol.DBSCANActorCompleted(result))
+
+  // Bookkeeping for an in-flight actor-based DBSCAN run (one per Clusterer at a time).
+  private var pendingPoints: Array[Point] = _
+  private var pendingStartNs: Long = 0L
+  private var pendingStartTimeMs: Long = 0L
+  private var pendingNumPoints: Int = 0
+
   private def getDbscanImpl(dbscanImpl: String, numPoints: Int) = {
     dbscanImpl match {
-      case "grid-actor" => new DBSCANGridAkka(epsilon, minPts, Some(context))
       case "grid" =>
         new DBSCANGrid(
           epsilon,
@@ -443,11 +507,24 @@ private class DBSCANState(
     }
   }
 
-  @inline def executeDBSCAN(points: Array[Point], dbscanImpl: String): Unit = {
+  /**
+   * Kicks off DBSCAN for `points`.
+   *
+   * For the synchronous implementations a `Future[Long]` (elapsed CPU millis) is returned and the
+   * caller is expected to pipe it back to itself. For the actor-based `grid-actor` implementation
+   * `None` is returned: the run is driven by messages and a [[ClustererProtocol.DBSCANActorCompleted]]
+   * message will arrive (via [[dbscanResultAdapter]]) once clustering finishes.
+   */
+  @inline def executeDBSCAN(
+                             points: Array[Point],
+                             dbscanImpl: String,
+                             startTimeMs: Long,
+                             numPoints: Int
+                           ): Option[Future[Long]] = {
     if (points.isEmpty) {
       clusteringResult = LocalDBSCANResult(cell.idx, Array(Array()), Array(Array()), new Long2IntOpenHashMap(0))
       numClusters = 0
-      return
+      return Some(Future.successful(0L))
     }
     val maxCenterDist = points.map(p => euclideanDistanceSquared(p.vector, cell.center)).max
     if (maxCenterDist < math.pow(epsilon / 2, 2)) {
@@ -457,15 +534,43 @@ private class DBSCANState(
         labelMap.put(points(i).id, 0)
       clusteringResult = LocalDBSCANResult(cell.idx, Array(points), Array(Array()), labelMap)
       numClusters = 1
-      return
+      return Some(Future.successful(0L))
     }
-    val dbscan = getDbscanImpl(dbscanImpl, points.length)
-    val (labelsArr, _) = dbscan.fit(points)
-    val labelMap = new Long2IntOpenHashMap(points.length)
-    for (i <- points.indices)
-      labelMap.put(points(i).id, labelsArr(i))
-    clusteringResult = LocalDBSCANResult(cell.idx, dbscan.getCorePoints, dbscan.getBorderPoints, labelMap)
-    numClusters = dbscan.getNumClusters
+
+    if (dbscanImpl == "grid-actor") {
+      pendingPoints = points
+      pendingNumPoints = numPoints
+      pendingStartTimeMs = startTimeMs
+      pendingStartNs = System.nanoTime()
+      DBSCANGridAkka.run(points, epsilon, minPts, context, dbscanResultAdapter)
+      None
+    } else {
+      val dbscan = getDbscanImpl(dbscanImpl, points.length)
+      Some(Future {
+        val startCpu = CpuTime.nowNanos
+        val (labelsArr, _) = dbscan.fit(points)
+        val labelMap = new Long2IntOpenHashMap(points.length)
+        for (i <- points.indices)
+          labelMap.put(points(i).id, labelsArr(i))
+        clusteringResult = LocalDBSCANResult(cell.idx, dbscan.getCorePoints, dbscan.getBorderPoints, labelMap)
+        numClusters = dbscan.getNumClusters
+        CpuTime.toMillis(CpuTime.nowNanos - startCpu)
+      }(clusteringExecutionContext))
+    }
+  }
+
+  /**
+   * Builds the local result from an actor DBSCAN [[DBSCANGridAkka.Result]] and returns the timing
+   * fields needed to emit a [[ClustererProtocol.DBSCANExecutionCompleted]].
+   */
+  def completeActorRun(result: DBSCANGridAkka.Result): (Long, Int, Long) = {
+    val labelMap = new Long2IntOpenHashMap(pendingPoints.length)
+    for (i <- pendingPoints.indices)
+      labelMap.put(pendingPoints(i).id, result.labels(i))
+    clusteringResult = LocalDBSCANResult(cell.idx, result.corePoints, result.borderPoints, labelMap)
+    numClusters = result.numClusters
+    val elapsedMs = (System.nanoTime() - pendingStartNs) / 1000000L
+    (pendingStartTimeMs, pendingNumPoints, elapsedMs)
   }
 
   @inline def getSharedBorder(otherCellIdx: Int): LocalDBSCANResult = {
@@ -473,9 +578,7 @@ private class DBSCANState(
       otherCellIdx != cell.idx,
       s"Other cell index ($otherCellIdx) must not be the same as current cell index (${cell.idx})"
     )
-    // Filter points that are in the shared border between the two cells
-    val isVeryClose =
-      euclideanDistanceSquared(cell.center, cell.getNeighbor(otherCellIdx).center) <= 4 * epsilon * epsilon // equal to euclideanDistance <= 2 * epsilon
+    val isVeryClose = euclideanDistanceSquared(cell.center, cell.getNeighbor(otherCellIdx).center) <= 4 * epsilon * epsilon // equal to euclideanDistance <= 2 * epsilon
 
     val thisCellCenter       = cell.center
     val otherMovedCellCenter = cell.shrunkVoronoiCell.getNeighborCenter(otherCellIdx)

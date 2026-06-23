@@ -41,7 +41,7 @@ private class Worker(guardian: ActorRef[GuardianProtocol.GuardianRequest]) {
               val ref = context.spawn(
                 Clusterer(cell, orchestrator, epsilonMergeManager, stats, writer, epsilon, minPts, dbscanImpl),
                 s"${Clusterer.DEFAULT_NAME}-${cell.idx}",
-                DispatcherSelector.fromConfig("akka.epsilon-extension-dispatcher")
+                DispatcherSelector.fromConfig("akka.worker-pool-dispatcher")
               )
               context.watch(ref)
               ref
@@ -51,7 +51,8 @@ private class Worker(guardian: ActorRef[GuardianProtocol.GuardianRequest]) {
               val ref =
                 context.spawn(
                   EpsilonMerger(orchestrator, globalMerger, stats),
-                  s"${EpsilonMerger.DEFAULT_NAME}-$left-$right"
+                  s"${EpsilonMerger.DEFAULT_NAME}-$left-$right",
+                  DispatcherSelector.fromConfig("akka.worker-pool-dispatcher")
                 )
               Edge[Int, Vertex[Int]](new Vertex(left), new Vertex(right)) -> ref
             }.toMap

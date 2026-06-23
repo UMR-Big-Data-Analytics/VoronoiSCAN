@@ -4,7 +4,6 @@ import scala.collection.mutable
 
 object MutualInformation {
 
-  // Example usage
   def main(args: Array[String]): Unit = {
     val labelsTrue = Seq(0, 0, 1, 1, 2, 2)
     val labelsPred = Seq(1, 1, 0, 0, 2, 2)
@@ -16,7 +15,6 @@ object MutualInformation {
     println(f"Normalized Mutual Information Score: $nmiScore%.4f")
   }
 
-  // Compute normalized mutual information score
   def normalizedMutualInfoScore(labelsTrue: Seq[Int], labelsPred: Seq[Int]): Double = {
     val mi    = mutualInfoScore(labelsTrue, labelsPred)
     val hTrue = entropy(labelsTrue)
@@ -31,7 +29,6 @@ object MutualInformation {
     else mi / math.sqrt(hTrue * hPred)
   }
 
-  // Compute the entropy of a label sequence
   private def entropy(labels: Seq[Int]): Double = {
     val labelCounts = labels.groupBy(identity).view.mapValues(_.size.toDouble).toMap
     val total       = labels.size.toDouble
@@ -41,26 +38,21 @@ object MutualInformation {
     }
   }
 
-  // Compute the mutual information score between two discrete variables
   def mutualInfoScore(labelsTrue: Seq[Int], labelsPred: Seq[Int]): Double = {
     require(labelsTrue.length == labelsPred.length, "Input sequences must have the same length")
 
-    // Get counts for each unique pair (true, pred)
     val pairCounts = mutable.Map[(Int, Int), Int]()
     labelsTrue.zip(labelsPred).foreach { case (trueLabel, predLabel) =>
       pairCounts((trueLabel, predLabel)) = pairCounts.getOrElse((trueLabel, predLabel), 0) + 1
     }
 
-    // Marginal counts
     val trueCounts = mutable.Map[Int, Int]()
     val predCounts = mutable.Map[Int, Int]()
     labelsTrue.foreach(label => trueCounts(label) = trueCounts.getOrElse(label, 0) + 1)
     labelsPred.foreach(label => predCounts(label) = predCounts.getOrElse(label, 0) + 1)
 
-    // Total number of samples
     val n = labelsTrue.length.toDouble
 
-    // Calculate mutual information
     pairCounts.foldLeft(0.0) { case (mi, ((trueLabel, predLabel), count)) =>
       val jointProb = count / n
       val trueProb  = trueCounts(trueLabel) / n

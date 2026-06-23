@@ -1,7 +1,7 @@
 package actors.merging
 
-import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.{ActorRef, Behavior}
 import data.LocalClusteringMerge
 import protocol.{GlobalMergeProtocol, OrchestratorProtocol, StatsProtocol}
 import utils.CpuTime

@@ -44,7 +44,6 @@ class EpsilonMerger private (
     state: EpsilonMerger.State
 ) {
 
-  // Track assemblies per cellIdx
   private val assemblies = mutable.Map[Int, EpsilonMerger.ChunkAssembly]()
 
   def behavior: Behavior[EpsilonMergeProtocol.EpsilonMergeRequest] =
@@ -106,13 +105,7 @@ class EpsilonMerger private (
           val end = Instant.now()
           val endCpu = CpuTime.nowNanos
           val cpuTimeMs = CpuTime.toMillis(endCpu - startCpu)
-          statsActor ! StatsProtocol.ReportEpsilonMergingTime(
-            (result1.cellIdx, result2.cellIdx),
-            start,
-            end,
-            cpuTimeMs,
-            sentNetworkEdges
-          )
+          statsActor ! StatsProtocol.ReportEpsilonMergingTime((result1.cellIdx, result2.cellIdx), start, end, cpuTimeMs, sentNetworkEdges)
           return true
         case _ => throw new IllegalStateException("LocalClusteringResults not present. This should not happen")
       }

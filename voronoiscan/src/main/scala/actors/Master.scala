@@ -39,7 +39,7 @@ class Master private (guardian: ActorRef[GuardianProtocol.GuardianRequest], poin
         context.spawn(
           Orchestrator(context.self, writer),
           Orchestrator.DEFAULT_NAME,
-          DispatcherSelector.fromConfig("akka.master-pinned-dispatcher")
+          //DispatcherSelector.fromConfig("akka.master-pinned-dispatcher")
         )
       }
       context.watch(orchestrator)

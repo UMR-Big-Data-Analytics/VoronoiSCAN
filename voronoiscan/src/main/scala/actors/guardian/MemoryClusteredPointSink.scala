@@ -19,7 +19,10 @@ case class MemoryClusteredPointSink() extends ClusteredPointSink {
     }
 
   override def getLabels: Option[Array[Int]] = {
-    val labels = Array.fill(map.size)(-1)
+    if (maxId > Int.MaxValue) {
+      return None
+    }
+    val labels = Array.fill((maxId + 1L).toInt)(-1)
     val iterator = map.long2IntEntrySet().iterator()
     while (iterator.hasNext) {
       val entry = iterator.next()

@@ -13,7 +13,6 @@ object DelaunayGraphBuilder {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  // Example usage
   def main(args: Array[String]): Unit = {
     val points = Array(
       Point(Array(0.0f, 0.0f), 1),

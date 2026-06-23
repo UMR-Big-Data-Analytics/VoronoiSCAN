@@ -24,9 +24,15 @@ object WriterProtocol {
   @SerialVersionUID(202511240001L)
   final case class ReportNumberOfPoints(numPoints: Long) extends WriterRequest with CborMessage
 
-  @SerialVersionUID(202508260002L)
-  final case class LabeledPointsChunk(ids: Array[Long], labels: Array[Int], chunkIdx: Int, totalChunks: Int)
-    extends WriterRequest
+  @SerialVersionUID(202508260005L)
+  final case class LabeledPointsChunk(
+                                       sourceCellIdx: Int,
+                                       ids: Array[Long],
+                                       labels: Array[Int],
+                                       chunkIdx: Int,
+                                       totalChunks: Int,
+                                       replyTo: ActorRef[ClustererProtocol.ClustererRequest]
+                                     ) extends WriterRequest
       with ProtobufMessage
 
   @SerialVersionUID(202508260003L)
@@ -38,5 +44,10 @@ object WriterProtocol {
 
   @SerialVersionUID(202508260004L)
   final case class ShutdownWriter() extends WriterRequest with CborMessage
+
+  @SerialVersionUID(202508260006L)
+  final case class LabelingStuckCheck() extends WriterRequest with CborMessage
+
+  final val LabelingStuckKey = "labeling-stuck-check"
 
 }

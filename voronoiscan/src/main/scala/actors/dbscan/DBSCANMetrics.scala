@@ -2,6 +2,7 @@ package actors.dbscan
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
+
 object DBSCANMetrics {
 
   val activeMarkCore = new AtomicInteger(0)
