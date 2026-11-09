@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use VoronoiSCAN, please cite our paper."
+title: "VoronoiSCAN: Enhancing DBSCAN with Voronoi Tessellation for Distributed Clustering"
+type: conference-paper
+authors:
+  - family-names: Siepe
+    given-names: Florian
+    orcid: https://orcid.org/0009-0008-5911-5327
+  - family-names: Papenbrock
+    given-names: Thorsten
+    orcid: https://orcid.org/0000-0002-4019-8221
+doi: "10.1145/3799682.3840743"
+url: "https://doi.org/10.1145/3799682.3840743"
+year: 2026
+publisher:
+  name: Association for Computing Machinery
+booktitle: "Proceedings of the 35th ACM International Conference on Information and Knowledge Management"
+collection-title: "CIKM '26"
+pages: 4360-4371
+conference:
+  name: "35th ACM International Conference on Information and Knowledge Management"
+  location: Rome, Italy
+  start: 2026-11-08
+  end: 2026-11-11
