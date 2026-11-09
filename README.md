@@ -1,6 +1,6 @@
 # VoronoiSCAN
 
-A distributed, reactive and exact DBSCAN implementation using Voronoi tessellations.
+A distributed, reactive and exact DBSCAN implementation using Voronoi tessellations published on [CIKM 2026](https://dl.acm.org/doi/10.1145/3799682.3840743).
 
 ## Supplementary Material
 
@@ -94,6 +94,27 @@ along with the required libraries. You can install the necessary libraries using
 
 ```bash
 pip install densired
+```
+
+# Citation
+If you find this useful, consider citing the paper:
+
+```
+@inproceedings{10.1145/3799682.3840743,
+author = {Siepe, Florian and Papenbrock, Thorsten},
+title = {VoronoiSCAN: Enhancing DBSCAN with Voronoi Tessellation for Distributed Clustering},
+year = {2026},
+isbn = {9798400725395},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+url = {https://doi.org/10.1145/3799682.3840743},
+doi = {10.1145/3799682.3840743},
+booktitle = {Proceedings of the 35th ACM International Conference on Information and Knowledge Management},
+pages = {4360–4371},
+numpages = {12},
+location = {Rome, Italy},
+series = {CIKM '26}
+}
 ```
 
 Then, run the script to generate the datasets:
