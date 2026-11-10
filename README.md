@@ -96,7 +96,7 @@ along with the required libraries. You can install the necessary libraries using
 pip install densired
 ```
 
-# Citation
+## Citation
 If you find this useful, consider citing the paper:
 
 ```
