@@ -95,6 +95,11 @@ along with the required libraries. You can install the necessary libraries using
 ```bash
 pip install densired
 ```
+Then, run the script to generate the datasets:
+
+```bash
+python3 densired_generator.py
+```
 
 ## Citation
 If you find this useful, consider citing the paper:
@@ -115,10 +120,4 @@ numpages = {12},
 location = {Rome, Italy},
 series = {CIKM '26}
 }
-```
-
-Then, run the script to generate the datasets:
-
-```bash
-python3 densired_generator.py
 ```
